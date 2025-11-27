@@ -57,6 +57,7 @@ async function getVars(vars) {
 }
 
 async function resolveEnvironmentVariable(key) {
+    let val = '';
     if( key.startsWith('!ImportValue ') ) {
         const importName = key.substring(13).trim();
         if( rawExports.has(importName) ) {
@@ -484,7 +485,7 @@ async function processSNSSubscriptions(stage,appAlias,commit) {
             const subscriptions = await sns.listSubscriptionsByTopic(topic.value);
             for(const subscription of subscriptions) {
                 const parts = subscription.endpoint.split(':');
-                if( parts.length === 8 && parts[8] !== appAlias ) {
+                if( parts.length === 8 && parts[7] !== appAlias ) {
                     console.log(`   - deleting old subscription to SNS topic '${topic.name}'`);
                     await sns.deleteSubscription(subscription.subscriptionArn);
                 }
