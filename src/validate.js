@@ -49,9 +49,7 @@ async function validate() {
   }
 }
 
-// Run validation if called directly
-if (require.main === module) {
-  validate();
-}
+// Run validation
+validate();
 
 module.exports = { validate };

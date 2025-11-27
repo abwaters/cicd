@@ -13,6 +13,12 @@ async function main() {
     const command = args[0];
     const commandArgs = args.slice(1);
 
+    // Handle help flags
+    if (command === 'help' || command === '--help' || command === '-h') {
+        showUsage();
+        process.exit(0);
+    }
+
     // Override process.argv to pass remaining args to subcommands
     process.argv = [process.argv[0], process.argv[1], ...commandArgs];
 
@@ -42,7 +48,8 @@ async function main() {
 }
 
 function showUsage() {
-    console.log(`Usage: node src/index.js <command> [options]
+    const cmd = require.main === module ? 'cicd' : 'node src/index.js';
+    console.log(`Usage: ${cmd} <command> [options]
 
 Commands:
   deploy <stage> <commit>     Deploy a commit to a stage
@@ -56,11 +63,11 @@ Commands:
   validate                    Validate cicd.json against schema
 
 Examples:
-  node src/index.js deploy dev abc123
-  node src/index.js deploy prod abc123 --api
-  node src/index.js clean
-  node src/index.js info --details
-  node src/index.js validate
+  ${cmd} deploy dev abc123
+  ${cmd} deploy prod abc123 --api
+  ${cmd} clean
+  ${cmd} info --details
+  ${cmd} validate
 `);
 }
 
