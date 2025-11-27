@@ -7,7 +7,7 @@ const path = require('path');
 /**
  * Validates cicd.json against cicd.schema.json
  */
-async function validate() {
+async function main() {
   try {
     // Load schema
     const schemaPath = path.join(__dirname, '..', 'cicd.schema.json');
@@ -49,7 +49,4 @@ async function validate() {
   }
 }
 
-// Run validation
-validate();
-
-module.exports = { validate };
+main();
