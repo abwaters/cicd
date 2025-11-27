@@ -1,6 +1,15 @@
 const { SNSClient, SubscribeCommand, ListSubscriptionsByTopicCommand, UnsubscribeCommand } = require("@aws-sdk/client-sns");
+const { getConfig } = require('./config');
 
-const client = new SNSClient({ region: "us-east-1" });
+let client = null;
+
+async function getClient() {
+    if (!client) {
+        const region = await getConfig('region');
+        client = new SNSClient({ region });
+    }
+    return client;
+}
 
 async function subscribeLambdaToTopic(topicArn,lambdaArn) {
     try {
@@ -10,7 +19,8 @@ async function subscribeLambdaToTopic(topicArn,lambdaArn) {
             Endpoint: lambdaArn
         };
 
-        const subscription = await client.send(new SubscribeCommand(params));
+        const snsClient = await getClient();
+        const subscription = await snsClient.send(new SubscribeCommand(params));
     } catch (error) {
         console.error("Error subscribing Lambda to SNS:", error);
     }
@@ -22,15 +32,16 @@ async function listSubscriptionsByTopic(topicArn) {
             TopicArn: topicArn
         });
         let subscriptions = [];
-        let response = await client.send(command);
+        const snsClient = await getClient();
+        let response = await snsClient.send(command);
         for(const r of response.Subscriptions ) {
             subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
         }
         while (response.NextToken) {
             command.input.NextToken = response.NextToken;
-            response = await client.send(command);
+            response = await snsClient.send(command);
             for(const r of response.Subscriptions ) {
-                subscriptions.push(r.Endpoint);
+                subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
             }
         }
         return subscriptions;
@@ -44,7 +55,8 @@ async function deleteSubscription(subscriptionArn) {
         const command = new UnsubscribeCommand({
             SubscriptionArn: subscriptionArn,
         });
-        await client.send(command);
+        const snsClient = await getClient();
+        await snsClient.send(command);
     } catch (error) {
         console.error("Error deleting subscription:", error);
     }
