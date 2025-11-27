@@ -2,13 +2,23 @@ const {
     STSClient,
     GetCallerIdentityCommand
 } = require("@aws-sdk/client-sts");
+const { getConfig } = require('./config');
 
-const client = new STSClient({ region: "us-east-1" });
+let client = null;
+
+async function getClient() {
+    if (!client) {
+        const region = await getConfig('region');
+        client = new STSClient({ region });
+    }
+    return client;
+}
 
 async function getAccountNumber() {
     try {
         const command = new GetCallerIdentityCommand({});
-        const response = await client.send(command);
+        const stsClient = await getClient();
+        const response = await stsClient.send(command);
         console.log(response);
         return response.Account;
     } catch (error) {

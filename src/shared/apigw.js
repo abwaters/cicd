@@ -16,8 +16,24 @@ const {
 const config = require('./config');
 const utils = require('./utils');
 
-const client = new APIGatewayClient({ region: "us-east-1" });
-const clientv2 = new ApiGatewayV2Client({ region: "us-east-1" });
+let client = null;
+let clientv2 = null;
+
+async function getClient() {
+    if (!client) {
+        const region = await config.getConfig('region');
+        client = new APIGatewayClient({ region });
+    }
+    return client;
+}
+
+async function getClientV2() {
+    if (!clientv2) {
+        const region = await config.getConfig('region');
+        clientv2 = new ApiGatewayV2Client({ region });
+    }
+    return clientv2;
+}
 
 async function createDeployment(apiId,commit) {
     try {
@@ -27,7 +43,8 @@ async function createDeployment(apiId,commit) {
             description: commit
         });
         await utils.sleep();
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
         return {id:response.id,description:response.description};
     } catch (error) {
         console.error("Error creating API Gateway deployment:", error);
@@ -36,7 +53,7 @@ async function createDeployment(apiId,commit) {
 }
 
 async function createStage(apiId, stageName, deploymentId, commit) {
-    const app = config.getConfig('cicd').app;
+    const app = await config.getConfig('app');
     try {
         const command = new CreateStageCommand({
             restApiId: apiId,
@@ -51,7 +68,8 @@ async function createStage(apiId, stageName, deploymentId, commit) {
             }
         });
         await utils.sleep();
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
     } catch (error) {
         console.error("Error creating API Gateway stage:", error);
     }
@@ -66,7 +84,8 @@ async function createCustomDomainMapping(domainName, restApiId, stage, basePath)
             basePath: basePath // Setting the basePath here
         });
         await utils.sleep();
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
     } catch (error) {
         console.error("Error creating base path mapping with basePath:", error);
     }
@@ -78,7 +97,8 @@ async function listDeployments(restApiId) {
             restApiId: restApiId
         });
 
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
         return response.items;
     } catch (error) {
         console.error("Error listing API deployments:", error);
@@ -91,7 +111,8 @@ async function listStages(restApiId) {
         const command = new GetStagesCommand({
             restApiId: restApiId
         });
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
         return response.item;
     } catch (error) {
         console.error("Error listing API stages:", error);
@@ -99,7 +120,8 @@ async function listStages(restApiId) {
 }
 
 async function updateStage(restApiId, stageName, deploymentId, commit) {
-    const app = config.getConfig('cicd').app;
+    const app = await config.getConfig('app');
+    const region = await config.getConfig('region');
     try {
         const command = new UpdateStageCommand({
             restApiId: restApiId,
@@ -123,11 +145,12 @@ async function updateStage(restApiId, stageName, deploymentId, commit) {
             ]
         });
 
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
 
         // Update tags on existing stage
         try {
-            const stageArn = `arn:aws:apigateway:us-east-1::/restapis/${restApiId}/stages/${stageName}`;
+            const stageArn = `arn:aws:apigateway:${region}::/restapis/${restApiId}/stages/${stageName}`;
             const tagCommand = new TagResourceCommand({
                 resourceArn: stageArn,
                 tags: {
@@ -136,7 +159,7 @@ async function updateStage(restApiId, stageName, deploymentId, commit) {
                     Commit: commit
                 }
             });
-            await client.send(tagCommand);
+            await apiClient.send(tagCommand);
         } catch (tagError) {
             console.error("Error tagging stage:", tagError);
         }
@@ -151,7 +174,8 @@ async function listBasePathMappings(domainName) {
             domainName: domainName
         });
 
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
         return response.items;
     } catch (error) {
         console.error(`Error listing base path mappings for domain ${domainName}:`, error);
@@ -167,9 +191,10 @@ async function createCustomDomainMappingV2(domainName, apiId, stage, basePath) {
             ApiMappingKey: basePath
         });
         await utils.sleep();
-        const response = await clientv2.send(command);
+        const apiClientV2 = await getClientV2();
+        const response = await apiClientV2.send(command);
     } catch (error) {
-
+        console.error("Error creating custom domain mapping V2:", error);
     }
 }
 
@@ -181,7 +206,8 @@ async function deleteDeployment(apiId, deploymentId) {
 
     try {
         await utils.sleep();
-        const response = await client.send(command);
+        const apiClient = await getClient();
+        const response = await apiClient.send(command);
     } catch (error) {
         console.error("Error deleting deployment:", error);
     }
