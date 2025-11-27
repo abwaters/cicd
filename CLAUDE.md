@@ -4,131 +4,169 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a custom AWS CI/CD deployment tool for managing Lambda functions, API Gateway, and SNS resources. It reads configuration from `cicd.json` and orchestrates deployments across multiple stages (prod, staging, tools).
+This is a custom AWS CI/CD deployment tool for managing Lambda functions, API Gateway, and SNS resources. It reads configuration from `cicd.json` and orchestrates deployments across multiple stages using Git commit-based versioning.
 
 ## Core Commands
 
-Run commands from the repository root:
+All commands are accessed through the main CLI tool at `src/index.js`:
 
 ```bash
-# Deploy a commit to a stage
-node src/deploy.js <stage> <commit>
+# Validate configuration before deploying
+npm run validate
+# or: node src/index.js validate
 
-# Deploy with options
-node src/deploy.js <stage> <commit> --env          # Only update environment variables
-node src/deploy.js <stage> <commit> --api          # Only update API Gateway
-node src/deploy.js <stage> <commit> --sns          # Only update SNS topics
-node src/deploy.js <stage> <commit> --api-filter=<api-name>  # Deploy specific API
+# Deploy a commit to a stage
+node src/index.js deploy <stage> <commit>
+
+# Deploy with selective updates
+node src/index.js deploy <stage> <commit> --env          # Only update environment variables
+node src/index.js deploy <stage> <commit> --api          # Only update API Gateway
+node src/index.js deploy <stage> <commit> --sns          # Only update SNS topics
+node src/index.js deploy <stage> <commit> --api-filter=<api-name>  # Deploy specific API
 
 # Get deployment information
-node src/info.js                    # Show current deployments for all stages
-node src/info.js --details          # Include function versions
+node src/index.js info              # Show current deployments for all stages
+node src/index.js info --details    # Include function versions
 
 # Clean up old deployments
-node src/clean.js                   # Remove unused API deployments, Lambda aliases/versions
-
-# Validate configuration
-node src/validate.js                # Validate cicd.json against schema
-npm run validate                    # Alternative using npm script
+node src/index.js clean             # Remove unused API deployments, Lambda aliases/versions
 ```
 
 ## Architecture
 
 ### Configuration System (`cicd.json`)
 
-The deployment system is driven entirely by `cicd.json`, which defines:
+The entire deployment system is driven by `cicd.json`, validated against `cicd.schema.json`. Configuration defines:
 - AWS account and region
-- Environment variables (with special prefixes for CloudFormation imports, SSM parameters, and local env vars)
-- API Gateway configurations with Lambda functions
-- SNS topic configurations with Lambda subscribers
-- Stage-specific configurations and domain mappings
+- Global and stage-specific environment variables
+- API Gateway REST APIs with Lambda integrations
+- SNS topics with Lambda subscribers
+- Stage configurations with custom domain mappings
 
-### Configuration Validation
+### Special Environment Variable Resolution
 
-A JSON Schema (`cicd.schema.json`) is provided to validate the structure of `cicd.json`:
-- Run `npm run validate` or `node src/validate.js` to validate your configuration
-- The schema validates required fields, data types, and structure
-- Validation is recommended before deploying to catch configuration errors early
-
-### Special Environment Variable Syntax
-
-Environment variables in `cicd.json` support three resolution patterns:
+Environment variables support three resolution patterns:
 - `!ImportValue <export-name>` - Resolves CloudFormation stack exports
 - `!ParameterStore <param-path>` - Resolves AWS Systems Manager parameters
 - `!SetEnv <env-var>` - Resolves from process environment variables
 
-### Deployment Flow
+Resolution happens in `cicd.js:resolveEnvironmentVariable()`, with stage-specific overrides applied after global variables.
 
-The `cicd.js` module orchestrates deployments in this order:
-1. Initialize exports from CloudFormation stacks
-2. Resolve environment variables (CloudFormation, SSM, local env)
-3. Update Lambda function environment variables
-4. Create Lambda versions and aliases for the commit
-5. Create/update API Gateway deployments and stages
-6. Configure custom domain mappings
-7. Update Lambda permissions for API Gateway or SNS triggers
-8. Subscribe Lambda functions to SNS topics (cleaning up old subscriptions)
+### Deployment Orchestration (`src/shared/cicd.js`)
 
-### Resource Organization
+The core orchestration module follows this flow:
 
-Resources are organized by type in the `exports` array of `cicd.json`:
-- `type: "api"` - API Gateway REST APIs with Lambda integrations
-- `type: "sns"` - SNS topics with Lambda subscribers
+1. **Initialization** (`init()`)
+   - Loads CloudFormation exports via `initExports()`
+   - Resolves all environment variables via `initEnvironment()`
+   - Caches exports in `exportMap` and functions in `functionMap`
+   - Stage config loaded via `setStageConfig()`
 
-Each export references CloudFormation stack exports by name. The system:
-1. Loads all CloudFormation exports at startup
-2. Matches them to configured resources
-3. Uses the resolved ARNs/IDs for deployments
+2. **Environment Variables** (`processFunctionEnvironmentVars()`)
+   - Iterates all Lambda functions (API + SNS)
+   - Builds environment object from config using `getVars()`
+   - Updates each function configuration via `lambda.updateEnvironmentVariables()`
 
-### Shared Modules (`src/shared/`)
+3. **API Gateway Deployment** (`processApiGateway()`)
+   - **Functions**: Creates Lambda versions (with commit as description) and aliases (format: `{app}-{commit}`)
+   - **APIs**: Creates/updates deployments, stages (with `Commit` variable), and custom domain mappings
+   - **Permissions**: Adds Lambda permissions for API Gateway invocation
 
-- `cicd.js` - Core orchestration logic
-- `config.js` - Loads and caches `cicd.json`
-- `options.js` - Command-line argument parser
-- `lambda.js` - AWS Lambda SDK wrapper (versions, aliases, permissions, concurrency)
-- `apigw.js` - API Gateway SDK wrapper (deployments, stages, mappings)
-- `sns.js` - SNS SDK wrapper (subscriptions)
-- `cloudformation.js` - CloudFormation exports lookup
-- `ps.js` - Parameter Store value resolution
-- `sts.js` - AWS STS for account identity
-- `utils.js` - Sleep utilities for rate limiting
-
-### Validation Module (`src/validate.js`)
-
-- `validate.js` - JSON Schema validation for `cicd.json` configuration
-  - Uses AJV (Another JSON Schema Validator) library
-  - Validates against `cicd.schema.json`
-  - Provides detailed error messages for invalid configurations
+4. **SNS Deployment** (`processSNS()`)
+   - **Functions**: Creates Lambda versions and aliases (same as API Gateway)
+   - **Subscriptions**: Removes old subscriptions, adds new ones with aliased function ARN
+   - **Permissions**: Adds Lambda permissions for SNS invocation
+   - **Stage Filtering**: Honors `stages` array in SNS config to limit deployments
 
 ### Versioning Strategy
 
-Lambda functions use Git commit-based versioning:
-- Lambda version description: `<commit-hash>`
-- Lambda alias name: `<app>-<commit-hash>`
-- API Gateway stage variables include `Commit: <app>-<commit-hash>`
-- Deployment descriptions include commit hash for tracking
+Git commit-based versioning ties everything together:
+- **Lambda version description**: `{app}-{commit}`
+- **Lambda alias name**: `{app}-{commit}`
+- **API Gateway stage variables**: `Commit: {app}-{commit}`
+- **API Gateway deployment description**: `{commit}`
 
-### Stage Management
+The `info` command reconstructs deployment state by reading API stage variables and SNS subscription endpoints (which contain alias in ARN).
 
-Stages are configured with:
-- Custom domain mapping (domain + base path)
-- Stage-specific environment variables
-- Stage-specific SNS topic filtering
+The `clean` command identifies active commits from stages/subscriptions, then deletes unused:
+- API Gateway deployments
+- Lambda aliases (not in active commits)
+- Lambda versions (not referenced by active aliases)
 
-The info command shows which commits are deployed to each stage by reading:
-- API Gateway stage variables
-- SNS subscription endpoints (which include the alias in the ARN)
+### Key Data Structures
 
-### Cleanup Process (`clean.js`)
+The `cicd.js` module maintains several caches:
+- `rawExports`: Map of all CloudFormation exports (name → value)
+- `exportMap`: Map of configured exports from `cicd.json` (name → config object with resolved value)
+- `functionMap`: Map of all Lambda functions (name → config object with resolved ARN)
+- `envCache`: Map of resolved environment variables (key → value)
+- `stageConfig`: Current stage configuration object
 
-The cleanup script:
-1. Identifies active commits from API stages and SNS subscriptions
-2. Deletes unused API Gateway deployments
-3. Deletes Lambda aliases not referenced by active commits
-4. Deletes Lambda versions not referenced by active aliases
+### AWS SDK Wrappers
 
-This keeps the AWS resources lean and prevents accumulation of old versions.
+All AWS SDK calls go through wrapper modules in `src/shared/`:
+- `lambda.js` - Versions, aliases, permissions, concurrency, environment variables
+- `apigw.js` - Deployments, stages, custom domain mappings, base path mappings
+- `sns.js` - Topic subscriptions, unsubscribe
+- `cloudformation.js` - List exports
+- `ps.js` - Get Parameter Store values
+- `sts.js` - Get caller identity
 
-## AWS SDK Version
+Each wrapper uses AWS SDK v3 with modular imports (`@aws-sdk/client-*`).
 
-Uses AWS SDK v3 (`@aws-sdk/client-*` packages) with modular imports.
+### Rate Limiting
+
+`utils.js` provides `sleep()` with configurable delays. Used throughout to avoid AWS API throttling:
+- Default sleep: 1000ms (configurable via `SLEEP_TIME`)
+- Extended sleep: 2000ms (used for critical operations in `cicd.js`)
+
+### Entry Points
+
+The main entry point is **`index.js`**, which routes to four subcommands:
+1. **`deploy.js`**: Parses CLI args, calls `cicd.processFunctionEnvironmentVars()`, `cicd.processApiGateway()`, `cicd.processSNS()`
+2. **`info.js`**: Lists stages, APIs, SNS topics; aggregates commit info from stage variables and subscriptions
+3. **`clean.js`**: Identifies active commits, deletes unused deployments/aliases/versions
+4. **`validate.js`**: Validates `cicd.json` against `cicd.schema.json` using AJV
+
+All use `options.js` for CLI argument parsing (supports `--option` and `--option=value` formats).
+
+### Configuration Validation
+
+`validate.js` uses AJV to validate `cicd.json` against `cicd.schema.json`. Schema enforces:
+- Required fields and data types
+- AWS account ID format (12 digits)
+- AWS region format
+- HTTP method enums
+- Environment variable naming patterns
+- Export type constraints (api/sns)
+
+## Key Patterns
+
+### CloudFormation Export Dependency
+
+The system depends on CloudFormation exports matching names in `cicd.json`:
+- Export names in config must exactly match CloudFormation export names
+- Missing exports cause deployment to exit with error
+- All exports resolved at initialization before any deployment operations
+
+### Idempotent Operations
+
+Deployment operations are idempotent:
+- Checks for existing versions/aliases/deployments before creating
+- Uses "find" helper functions (`findVersion()`, `findAlias()`, `findDeployment()`, etc.)
+- Updates existing stages rather than failing
+
+### Stage-Specific Environment Variables
+
+Stage overrides work by:
+1. Loading global environment from `cicd.json:environment`
+2. Loading stage-specific environment from `stages[].environment`
+3. Stage variables override globals (last write wins in `envCache`)
+4. SNS topics can be limited to specific stages via `stages` array
+
+### Concurrency Configuration
+
+Functions can specify reserved concurrency via `concurrency` field:
+- Value of `0` throttles function (used for Slack APIs to prevent rate limiting)
+- Updates provisioned concurrency after alias creation/update
+- Only applies to API Gateway functions (not SNS functions in current implementation)
