@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CI/CD Configuration Schema",
+  "description": "Schema for validating cicd.json configuration files for AWS Lambda/API Gateway/SNS deployments",
+  "type": "object",
+  "required": ["app", "account", "region", "exports", "stages"],
+  "properties": {
+    "app": {
+      "type": "string",
+      "description": "Application name used for resource naming and versioning",
+      "minLength": 1
+    },
+    "account": {
+      "type": "string",
+      "description": "AWS account ID (12-digit number)",
+      "pattern": "^[0-9]{12}$"
+    },
+    "region": {
+      "type": "string",
+      "description": "AWS region for deployments",
+      "pattern": "^[a-z]{2}-[a-z]+-[0-9]{1}$"
+    },
+    "environment": {
+      "type": "object",
+      "description": "Global environment variables for all Lambda functions. Supports !ImportValue, !ParameterStore, and !SetEnv prefixes",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "exports": {
+      "type": "array",
+      "description": "Array of API Gateway and SNS resources to manage",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "API Gateway REST API configuration",
+            "required": ["type", "name", "path", "functions"],
+            "properties": {
+              "type": {
+                "const": "api"
+              },
+              "name": {
+                "type": "string",
+                "description": "CloudFormation export name for the API Gateway REST API ID",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "description": "Base path for API endpoints",
+                "minLength": 1
+              },
+              "functions": {
+                "type": "array",
+                "description": "Lambda functions to integrate with this API",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/definitions/functionConfig"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "SNS topic configuration",
+            "required": ["type", "name", "functions"],
+            "properties": {
+              "type": {
+                "const": "sns"
+              },
+              "name": {
+                "type": "string",
+                "description": "CloudFormation export name for the SNS topic ARN",
+                "minLength": 1
+              },
+              "stages": {
+                "type": "array",
+                "description": "Stages where this SNS topic should be configured",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "functions": {
+                "type": "array",
+                "description": "Lambda functions to subscribe to this topic",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/definitions/functionConfig"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "stages": {
+      "type": "array",
+      "description": "Deployment stages with custom domain mappings and environment overrides",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["stage"],
+        "properties": {
+          "stage": {
+            "type": "string",
+            "description": "Stage name (e.g., prod, staging, tools)",
+            "minLength": 1
+          },
+          "mapping": {
+            "type": "object",
+            "description": "Custom domain mapping for API Gateway",
+            "required": ["domain", "path"],
+            "properties": {
+              "domain": {
+                "type": "string",
+                "description": "Custom domain name",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "description": "Base path mapping (empty string for root)"
+              }
+            },
+            "additionalProperties": false
+          },
+          "environment": {
+            "type": "object",
+            "description": "Stage-specific environment variable overrides. Supports !ImportValue, !ParameterStore, and !SetEnv prefixes",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "functionConfig": {
+      "type": "object",
+      "description": "Lambda function configuration",
+      "required": ["name", "method"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "CloudFormation export name for the Lambda function ARN",
+          "minLength": 1
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method for API integration (GET, POST, PUT, DELETE, etc.)",
+          "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+        },
+        "env": {
+          "type": "string",
+          "description": "Comma-separated list of environment variable names from global or stage environment",
+          "pattern": "^[A-Z_][A-Z0-9_]*(,[A-Z_][A-Z0-9_]*)*$"
+        },
+        "concurrency": {
+          "type": "integer",
+          "description": "Reserved concurrent executions for this Lambda function (0 for throttling)",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
