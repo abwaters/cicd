@@ -7,10 +7,10 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "deploy": "node src/deploy.js",
-    "info": "node src/info.js",
-    "clean": "node src/clean.js",
-    "validate": "node src/validate.js",
+    "deploy": "node src/index.js deploy",
+    "info": "node src/index.js info",
+    "clean": "node src/index.js clean",
+    "validate": "node src/index.js validate",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
