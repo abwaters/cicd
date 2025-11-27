@@ -13,8 +13,17 @@ const {
     DeleteProvisionedConcurrencyConfigCommand,
     AddPermissionCommand
 } = require("@aws-sdk/client-lambda");
+const { getConfig } = require('./config');
 
-const client = new LambdaClient({ region: "us-east-1" }); // or your preferred region
+let client = null;
+
+async function getClient() {
+    if (!client) {
+        const region = await getConfig('region');
+        client = new LambdaClient({ region });
+    }
+    return client;
+}
 
 async function publishNewVersion(functionName,commit) {
     try {
@@ -23,7 +32,8 @@ async function publishNewVersion(functionName,commit) {
             FunctionName: functionName,
             Description: commit
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
         return {version:response.Version,description:response.Description,arn:response.FunctionArn};
     } catch (error) {
         console.error("Error publishing Lambda version:", error);
@@ -36,7 +46,8 @@ async function listVersions(functionName) {
         const command = new ListVersionsByFunctionCommand({
             FunctionName: functionName
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
         const versions = [];
         for(const version of response.Versions) {
             versions.push({version:version.Version,description:version.Description});
@@ -54,7 +65,8 @@ async function listAliases(functionName) {
         const command = new ListAliasesCommand({
             FunctionName: functionName
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
         const aliases = [];
         for(const alias of response.Aliases) {
             aliases.push({alias:alias.Name,version:alias.FunctionVersion});
@@ -71,7 +83,8 @@ async function describeFunction(functionName) {
         const command = new GetFunctionCommand({
             FunctionName: functionName
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
         return response.Configuration;
     } catch (error) {
         console.error("Error retrieving Lambda function details:", error);
@@ -84,7 +97,8 @@ async function listFunctionTags(functionArn) {
         const command = new ListTagsCommand({
             Resource: functionArn
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
         return response.Tags;
     } catch (error) {
         console.error("Error listing Lambda function tags:", error);
@@ -100,7 +114,8 @@ async function createAlias(functionName, commit, functionVersion) {
             FunctionVersion: functionVersion,
             Description: commit
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
         return response;
     } catch (error) {
         console.error("Error creating Lambda alias:", error);
@@ -110,16 +125,31 @@ async function createAlias(functionName, commit, functionVersion) {
 
 async function addFunctionPermission(functionName, sourceArn,principal) {
     try {
+        // Create a deterministic StatementId to avoid accumulation
+        // Use a hash of the source ARN and principal to make it unique but repeatable
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256')
+            .update(`${sourceArn}-${principal}`)
+            .digest('hex')
+            .substring(0, 16);
+        const statementId = `invoke-${hash}`;
+
         const command = new AddPermissionCommand({
             FunctionName: functionName,
-            StatementId: `${new Date().getTime()}`,
+            StatementId: statementId,
             Principal: principal,
             Action: "lambda:InvokeFunction",
             SourceArn: sourceArn,
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
     } catch (error) {
-        console.error("Error adding function permission:", error);
+        // If permission already exists, that's fine - it means we've already added it
+        if (error.name === 'ResourceConflictException') {
+            // Permission already exists, no action needed
+        } else {
+            console.error("Error adding function permission:", error);
+        }
     }
 }
 
@@ -130,7 +160,8 @@ async function deleteAlias(functionName, aliasName) {
     });
 
     try {
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
     } catch (error) {
         console.error("Error deleting alias:", error);
     }
@@ -142,16 +173,18 @@ async function deleteVersion(functionName, versionNumber) {
     });
 
     try {
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
     } catch (error) {
         console.error("Error deleting function version:", error);
     }
 }
 
 async function updateProvisionedConcurrency(functionName,aliasName,concurrency) {
+    const lambdaClient = await getClient();
     if( concurrency ) {
         try {
-            await client.send(new PutProvisionedConcurrencyConfigCommand({
+            await lambdaClient.send(new PutProvisionedConcurrencyConfigCommand({
                 FunctionName: functionName,
                 Qualifier: aliasName,
                 ProvisionedConcurrentExecutions: concurrency
@@ -161,7 +194,7 @@ async function updateProvisionedConcurrency(functionName,aliasName,concurrency) 
         }
     }else{
         try {
-            await client.send(new DeleteProvisionedConcurrencyConfigCommand({
+            await lambdaClient.send(new DeleteProvisionedConcurrencyConfigCommand({
                 FunctionName: functionName,
                 Qualifier: aliasName,
             }));
@@ -189,7 +222,8 @@ async function updateEnvironmentVariables(functionName, envVars) {
                 Variables: envVars
             }
         });
-        const response = await client.send(command);
+        const lambdaClient = await getClient();
+        const response = await lambdaClient.send(command);
         //console.log(response);
     } catch (error) {
         console.error("Error updating Lambda environment variables:", error);

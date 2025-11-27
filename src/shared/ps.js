@@ -1,7 +1,16 @@
 const { SSMClient, GetParameterCommand, GetParametersByPathCommand } = require("@aws-sdk/client-ssm");
+const { getConfig } = require('./config');
 
-const client = new SSMClient({ region: "us-east-1" });
+let client = null;
 const psValues = new Map();
+
+async function getClient() {
+    if (!client) {
+        const region = await getConfig('region');
+        client = new SSMClient({ region });
+    }
+    return client;
+}
 
 async function getParameterValue(parameterName, withDecryption) {
     try {
@@ -13,7 +22,8 @@ async function getParameterValue(parameterName, withDecryption) {
             WithDecryption: withDecryption, // Set to true if it's a SecureString
         });
 
-        const response = await client.send(command);
+        const ssmClient = await getClient();
+        const response = await ssmClient.send(command);
         const value = response.Parameter.Value || '';
         psValues.set(parameterName, value);
         return value;
@@ -31,7 +41,8 @@ async function getParametersByPath(path, withDecryption) {
             WithDecryption: withDecryption,
         });
 
-        const response = await client.send(command);
+        const ssmClient = await getClient();
+        const response = await ssmClient.send(command);
 
         return response.Parameters.reduce((acc, param) => {
             acc[param.Name] = param.Value || "";
