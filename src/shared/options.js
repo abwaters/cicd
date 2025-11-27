@@ -4,7 +4,7 @@ function camelCaseOption(opt) {
       for(let i=0;i<parts.length;i++) {
           let part = parts[i].toLowerCase();
           if( i != 0 ) {
-              part = part.substr(0,1).toUpperCase()+part.substr(1);
+              part = part.substring(0,1).toUpperCase()+part.substring(1);
           }
           ccOpt += part;
       }
@@ -16,10 +16,10 @@ function getOptions(args) {
     for(const arg of args) {
         if( arg.startsWith('--') ) {
             if( arg.includes('=') ) {
-                let [name,value] = arg.substr(2).split('=');
+                let [name,value] = arg.substring(2).split('=');
                 options[camelCaseOption(name)] = value;
             }else{
-                options[camelCaseOption(arg.substr(2))] = true;
+                options[camelCaseOption(arg.substring(2))] = true;
             }
         }
     }
