@@ -48,6 +48,7 @@ async function listSubscriptionsByTopic(topicArn) {
     } catch (error) {
         console.error("Error listing subscriptions for topic:", error);
     }
+    return [];
 }
 
 async function deleteSubscription(subscriptionArn) {
