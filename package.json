@@ -1,0 +1,26 @@
+{
+  "name": "cicd",
+  "version": "1.0.0",
+  "description": "AWS CI/CD deployment tool for Lambda, API Gateway, and SNS",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "deploy": "node src/deploy.js",
+    "info": "node src/info.js",
+    "clean": "node src/clean.js",
+    "validate": "node src/validate.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-api-gateway": "^3.0.0",
+    "@aws-sdk/client-apigatewayv2": "^3.0.0",
+    "@aws-sdk/client-cloudformation": "^3.0.0",
+    "@aws-sdk/client-lambda": "^3.0.0",
+    "@aws-sdk/client-sns": "^3.0.0",
+    "@aws-sdk/client-ssm": "^3.0.0",
+    "@aws-sdk/client-sts": "^3.0.0",
+    "ajv": "^8.12.0"
+  }
+}
