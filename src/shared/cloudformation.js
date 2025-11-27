@@ -1,12 +1,30 @@
 const {ListExportsCommand, CloudFormationClient} = require("@aws-sdk/client-cloudformation");
+const { getConfig } = require('./config');
 
-const client = new CloudFormationClient({ region: "us-east-1" });
+let client = null;
+
+async function getClient() {
+    if (!client) {
+        const region = await getConfig('region');
+        client = new CloudFormationClient({ region });
+    }
+    return client;
+}
 
 async function listExports() {
     try {
-        const command = new ListExportsCommand({});
-        const response = await client.send(command);
-        return [...response.Exports];
+        const exports = [];
+        let nextToken = undefined;
+        const cfClient = await getClient();
+
+        do {
+            const command = new ListExportsCommand({ NextToken: nextToken });
+            const response = await cfClient.send(command);
+            exports.push(...response.Exports);
+            nextToken = response.NextToken;
+        } while (nextToken);
+
+        return exports;
     } catch (error) {
         console.error(error);
     }
