@@ -117,6 +117,7 @@ async function listStages(restApiId) {
     } catch (error) {
         console.error("Error listing API stages:", error);
     }
+    return [];
 }
 
 async function updateStage(restApiId, stageName, deploymentId, commit) {
@@ -180,6 +181,7 @@ async function listBasePathMappings(domainName) {
     } catch (error) {
         console.error(`Error listing base path mappings for domain ${domainName}:`, error);
     }
+    return [];
 }
 
 async function createCustomDomainMappingV2(domainName, apiId, stage, basePath) {
