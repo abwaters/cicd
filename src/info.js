@@ -3,8 +3,12 @@ const cicd = require('./shared/cicd');
 const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
 const sns = require('./shared/sns');
+const credentials = require('./shared/credentials');
 
 async function main() {
+    // Validate AWS credentials before proceeding
+    await credentials.validateCredentials();
+
     //const subs = await sns.listSubscriptionsByTopic('arn:aws:sns:us-east-1:907688428238:ccfw-command');
     //process.exit(-1);
 
