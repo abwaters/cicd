@@ -2,8 +2,12 @@ const sns = require('./shared/sns');
 const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
 const cicd = require('./shared/cicd');
+const credentials = require('./shared/credentials');
 
 async function main() {
+    // Validate AWS credentials before proceeding
+    await credentials.validateCredentials();
+
     const account = await cicd.getConfig("account");
     const region = await cicd.getConfig("region");
 
