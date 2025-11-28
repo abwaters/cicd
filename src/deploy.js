@@ -1,9 +1,12 @@
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
+const credentials = require('./shared/credentials');
 
 const SLEEP_TIME = 2000;
 
 async function main() {
+    // Validate AWS credentials before proceeding
+    await credentials.validateCredentials();
 
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
