@@ -3,10 +3,22 @@ const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
 const cicd = require('./shared/cicd');
 const credentials = require('./shared/credentials');
+const options = require('./shared/options');
+const logger = require('./shared/logger');
 
 async function main() {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
+
+    // Parse options
+    const args = process.argv.slice(2);
+    const o = options.getOptions(args);
+
+    // Set verbose mode if requested
+    if (o.verbose) {
+        logger.setVerbose(true);
+        logger.log('Verbose mode enabled');
+    }
 
     const account = await cicd.getConfig("account");
     const region = await cicd.getConfig("region");

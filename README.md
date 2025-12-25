@@ -144,6 +144,8 @@ Environment variables support special resolution syntax:
 
 ## Commands
 
+All commands support the `--verbose` flag for detailed debugging output.
+
 ### Deploy
 
 Deploy a commit to a stage:
@@ -156,12 +158,14 @@ cicd deploy <stage> <commit> --env              # Only update environment variab
 cicd deploy <stage> <commit> --api              # Only update API Gateway
 cicd deploy <stage> <commit> --sns              # Only update SNS topics
 cicd deploy <stage> <commit> --api-filter=name  # Deploy specific API
+cicd deploy <stage> <commit> --verbose          # Enable verbose logging
 ```
 
 Examples:
 ```bash
 cicd deploy dev abc123
 cicd deploy prod abc123 --api
+cicd deploy staging abc123 --verbose
 ```
 
 ### Info
@@ -173,6 +177,9 @@ cicd info
 
 # Include Lambda function versions
 cicd info --details
+
+# Enable verbose logging
+cicd info --verbose
 ```
 
 ### Clean
@@ -181,6 +188,9 @@ Remove unused API deployments, Lambda aliases, and versions:
 
 ```bash
 cicd clean
+
+# Enable verbose logging
+cicd clean --verbose
 ```
 
 This command:
@@ -195,6 +205,9 @@ Validate cicd.json configuration:
 
 ```bash
 cicd validate
+
+# Enable verbose logging
+cicd validate --verbose
 ```
 
 ## How It Works

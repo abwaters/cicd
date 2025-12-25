@@ -44,7 +44,7 @@ async function publishNewVersion(functionName,commit) {
 /**
  * Lists all versions of a Lambda function
  * @param {string} functionName - The Lambda function name
- * @returns {Promise<Array>} Array of version objects with {version, description}, or exits on error
+ * @returns {Promise<Array>} Array of version objects with {version, description}, or empty array on error
  */
 async function listVersions(functionName) {
     try {
@@ -60,7 +60,7 @@ async function listVersions(functionName) {
         return versions;
     } catch (error) {
         console.error("Error listing Lambda versions:", error);
-        process.exit(-1);
+        return [];
     }
 }
 

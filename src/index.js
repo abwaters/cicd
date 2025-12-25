@@ -53,19 +53,25 @@ function showUsage() {
 
 Commands:
   deploy <stage> <commit>     Deploy a commit to a stage
-                              Options: --env, --api, --sns, --api-filter=<name>
+                              Options: --env, --api, --sns, --api-filter=<name>, --verbose
 
   clean                       Clean up unused API deployments, Lambda aliases/versions
+                              Options: --verbose
 
   info [options]              Show current deployments for all stages
-                              Options: --details
+                              Options: --details, --verbose
 
   validate                    Validate cicd.json against schema
+                              Options: --verbose
+
+Global Options:
+  --verbose                   Enable verbose logging for debugging
 
 Examples:
   ${cmd} deploy dev abc123
   ${cmd} deploy prod abc123 --api
-  ${cmd} clean
+  ${cmd} deploy staging abc123 --verbose
+  ${cmd} clean --verbose
   ${cmd} info --details
   ${cmd} validate
 `);
