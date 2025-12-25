@@ -3,19 +3,33 @@
 const Ajv = require('ajv');
 const fs = require('fs');
 const path = require('path');
+const options = require('./shared/options');
+const logger = require('./shared/logger');
 
 /**
  * Validates cicd.json against cicd.schema.json
  */
 async function main() {
   try {
+    // Parse options
+    const args = process.argv.slice(2);
+    const o = options.getOptions(args);
+
+    // Set verbose mode if requested
+    if (o.verbose) {
+        logger.setVerbose(true);
+        logger.log('Verbose mode enabled');
+    }
+
     // Load schema
     const schemaPath = path.join(__dirname, '..', 'cicd.schema.json');
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+    logger.verbose('Loaded schema from:', schemaPath);
 
     // Load config
     const configPath = path.join(__dirname, '..', 'cicd.json');
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    logger.verbose('Loaded config from:', configPath);
 
     // Create validator
     const ajv = new Ajv({ allErrors: true, verbose: true });

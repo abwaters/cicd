@@ -1,6 +1,7 @@
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
 const credentials = require('./shared/credentials');
+const logger = require('./shared/logger');
 
 const SLEEP_TIME = 2000;
 
@@ -11,6 +12,12 @@ async function main() {
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
     args = options.stripOptions(args);
+
+    // Set verbose mode if requested
+    if (o.verbose) {
+        logger.setVerbose(true);
+        logger.log('Verbose mode enabled');
+    }
     if( args.length != 2 ) {
         console.log(`deploy <stage> <commit>`);
         process.exit(0);
