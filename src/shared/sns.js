@@ -34,13 +34,13 @@ async function listSubscriptionsByTopic(topicArn) {
         let subscriptions = [];
         const snsClient = await getClient();
         let response = await snsClient.send(command);
-        for(const r of response.Subscriptions ) {
+        for(const r of (response.Subscriptions || [])) {
             subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
         }
         while (response.NextToken) {
             command.input.NextToken = response.NextToken;
             response = await snsClient.send(command);
-            for(const r of response.Subscriptions ) {
+            for(const r of (response.Subscriptions || [])) {
                 subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
             }
         }

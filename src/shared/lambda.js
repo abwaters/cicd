@@ -49,7 +49,7 @@ async function listVersions(functionName) {
         const lambdaClient = await getClient();
         const response = await lambdaClient.send(command);
         const versions = [];
-        for(const version of response.Versions) {
+        for(const version of (response.Versions || [])) {
             versions.push({version:version.Version,description:version.Description});
         }
         return versions;
@@ -68,7 +68,7 @@ async function listAliases(functionName) {
         const lambdaClient = await getClient();
         const response = await lambdaClient.send(command);
         const aliases = [];
-        for(const alias of response.Aliases) {
+        for(const alias of (response.Aliases || [])) {
             aliases.push({alias:alias.Name,version:alias.FunctionVersion});
         }
         return aliases;
@@ -99,11 +99,11 @@ async function listFunctionTags(functionArn) {
         });
         const lambdaClient = await getClient();
         const response = await lambdaClient.send(command);
-        return response.Tags;
+        return response.Tags || {};
     } catch (error) {
         console.error("Error listing Lambda function tags:", error);
     }
-    return null;
+    return {};
 }
 
 async function createAlias(functionName, commit, functionVersion) {
