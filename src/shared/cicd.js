@@ -88,6 +88,9 @@ async function resolveEnvironmentVariable(key) {
 }
 
 async function initEnvironmentVars(env) {
+    if (!env) {
+        return;
+    }
     const envConfig = Object.keys(env) ;
     for(const key of envConfig) {
         let val = await resolveEnvironmentVariable(env[key]);
@@ -308,8 +311,6 @@ async function processFunctionEnvironmentVars() {
         if( funcEnv ) {
             //console.log(JSON.stringify(funcEnv,null,2));
             await lambda.updateEnvironmentVariables(functionName,funcEnv);
-        }else{
-            console.log(`     x no vars for this function`);
         }
     }
     await utils.sleep(EXTENDED_SLEEP_TIME);
@@ -498,6 +499,10 @@ async function processSNSSubscriptions(stage,appAlias,commit) {
 }
 
 async function processSNS(stage,appAlias,commit) {
+    const topics = await getExportsByType('sns');
+    if (topics.length === 0) {
+        return;
+    }
     console.log(`\nUpdating sns topics:`);
     await processSNSFunctions(stage,appAlias,commit);
     await processSNSSubscriptions(stage,appAlias,commit);

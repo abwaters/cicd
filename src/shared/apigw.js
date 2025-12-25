@@ -99,7 +99,7 @@ async function listDeployments(restApiId) {
 
         const apiClient = await getClient();
         const response = await apiClient.send(command);
-        return response.items;
+        return response.items || [];
     } catch (error) {
         console.error("Error listing API deployments:", error);
     }
@@ -113,7 +113,7 @@ async function listStages(restApiId) {
         });
         const apiClient = await getClient();
         const response = await apiClient.send(command);
-        return response.item;
+        return response.item || [];
     } catch (error) {
         console.error("Error listing API stages:", error);
     }
@@ -177,7 +177,7 @@ async function listBasePathMappings(domainName) {
 
         const apiClient = await getClient();
         const response = await apiClient.send(command);
-        return response.items;
+        return response.items || [];
     } catch (error) {
         console.error(`Error listing base path mappings for domain ${domainName}:`, error);
     }
