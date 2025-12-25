@@ -4,6 +4,7 @@ const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
 const sns = require('./shared/sns');
 const credentials = require('./shared/credentials');
+const logger = require('./shared/logger');
 
 async function main() {
     // Validate AWS credentials before proceeding
@@ -17,6 +18,12 @@ async function main() {
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
     args = options.stripOptions(args);
+
+    // Set verbose mode if requested
+    if (o.verbose) {
+        logger.setVerbose(true);
+        logger.log('Verbose mode enabled');
+    }
 
     console.time("api cicd");
     console.log(`Collecting information for stages...\n`);
