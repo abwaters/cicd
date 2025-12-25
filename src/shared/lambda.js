@@ -41,6 +41,11 @@ async function publishNewVersion(functionName,commit) {
     return '';
 }
 
+/**
+ * Lists all versions of a Lambda function
+ * @param {string} functionName - The Lambda function name
+ * @returns {Promise<Array>} Array of version objects with {version, description}, or exits on error
+ */
 async function listVersions(functionName) {
     try {
         const command = new ListVersionsByFunctionCommand({
@@ -57,9 +62,13 @@ async function listVersions(functionName) {
         console.error("Error listing Lambda versions:", error);
         process.exit(-1);
     }
-    return [];
 }
 
+/**
+ * Lists all aliases for a Lambda function
+ * @param {string} functionName - The Lambda function name
+ * @returns {Promise<Array>} Array of alias objects with {alias, version}, or empty array on error
+ */
 async function listAliases(functionName) {
     try {
         const command = new ListAliasesCommand({
@@ -74,10 +83,15 @@ async function listAliases(functionName) {
         return aliases;
     } catch (error) {
         console.error("Error listing Lambda aliases:", error);
+        return [];
     }
-    return [];
 }
 
+/**
+ * Describes a Lambda function and returns its configuration
+ * @param {string} functionName - The Lambda function name
+ * @returns {Promise<Object|null>} Function configuration object, or null on error
+ */
 async function describeFunction(functionName) {
     try {
         const command = new GetFunctionCommand({
@@ -88,10 +102,15 @@ async function describeFunction(functionName) {
         return response.Configuration;
     } catch (error) {
         console.error("Error retrieving Lambda function details:", error);
+        return null;
     }
-    return null;
 }
 
+/**
+ * Lists all tags for a Lambda function
+ * @param {string} functionArn - The Lambda function ARN
+ * @returns {Promise<Object>} Object containing tags as key-value pairs, or empty object on error
+ */
 async function listFunctionTags(functionArn) {
     try {
         const command = new ListTagsCommand({
@@ -102,8 +121,8 @@ async function listFunctionTags(functionArn) {
         return response.Tags || {};
     } catch (error) {
         console.error("Error listing Lambda function tags:", error);
+        return {};
     }
-    return {};
 }
 
 async function createAlias(functionName, commit, functionVersion) {

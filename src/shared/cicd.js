@@ -5,6 +5,7 @@ const utils = require('./utils');
 const cf = require('./cloudformation');
 const ps = require('./ps');
 const {getConfig} = require('./config');
+const logger = require('./logger');
 
 const EXTENDED_SLEEP_TIME = 2000;
 
@@ -309,8 +310,9 @@ async function processFunctionEnvironmentVars() {
         console.log(`   - setting environment vars for function: '${functionName}'...`);
         const funcEnv = await getVars(f.env);
         if( funcEnv ) {
-            //console.log(JSON.stringify(funcEnv,null,2));
             await lambda.updateEnvironmentVariables(functionName,funcEnv);
+        } else {
+            logger.verbose(`     x no vars for this function`);
         }
     }
     await utils.sleep(EXTENDED_SLEEP_TIME);

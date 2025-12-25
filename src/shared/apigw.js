@@ -91,6 +91,11 @@ async function createCustomDomainMapping(domainName, restApiId, stage, basePath)
     }
 }
 
+/**
+ * Lists all deployments for a REST API
+ * @param {string} restApiId - The REST API ID
+ * @returns {Promise<Array>} Array of deployment objects, or empty array on error
+ */
 async function listDeployments(restApiId) {
     try {
         const command = new GetDeploymentsCommand({
@@ -102,10 +107,15 @@ async function listDeployments(restApiId) {
         return response.items || [];
     } catch (error) {
         console.error("Error listing API deployments:", error);
+        return [];
     }
-    return [];
 }
 
+/**
+ * Lists all stages for a REST API
+ * @param {string} restApiId - The REST API ID
+ * @returns {Promise<Array>} Array of stage objects, or empty array on error
+ */
 async function listStages(restApiId) {
     try {
         const command = new GetStagesCommand({
@@ -116,8 +126,8 @@ async function listStages(restApiId) {
         return response.item || [];
     } catch (error) {
         console.error("Error listing API stages:", error);
+        return [];
     }
-    return [];
 }
 
 async function updateStage(restApiId, stageName, deploymentId, commit) {
@@ -169,6 +179,11 @@ async function updateStage(restApiId, stageName, deploymentId, commit) {
     }
 }
 
+/**
+ * Lists all base path mappings for a custom domain
+ * @param {string} domainName - The custom domain name
+ * @returns {Promise<Array>} Array of base path mapping objects, or empty array on error
+ */
 async function listBasePathMappings(domainName) {
     try {
         const command = new GetBasePathMappingsCommand({
@@ -180,8 +195,8 @@ async function listBasePathMappings(domainName) {
         return response.items || [];
     } catch (error) {
         console.error(`Error listing base path mappings for domain ${domainName}:`, error);
+        return [];
     }
-    return [];
 }
 
 async function createCustomDomainMappingV2(domainName, apiId, stage, basePath) {

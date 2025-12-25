@@ -26,6 +26,11 @@ async function subscribeLambdaToTopic(topicArn,lambdaArn) {
     }
 }
 
+/**
+ * Lists all subscriptions for an SNS topic (with pagination support)
+ * @param {string} topicArn - The SNS topic ARN
+ * @returns {Promise<Array>} Array of subscription objects with {subscriptionArn, protocol, endpoint}, or empty array on error
+ */
 async function listSubscriptionsByTopic(topicArn) {
     try {
         let command = new ListSubscriptionsByTopicCommand({
@@ -47,8 +52,8 @@ async function listSubscriptionsByTopic(topicArn) {
         return subscriptions;
     } catch (error) {
         console.error("Error listing subscriptions for topic:", error);
+        return [];
     }
-    return [];
 }
 
 async function deleteSubscription(subscriptionArn) {
