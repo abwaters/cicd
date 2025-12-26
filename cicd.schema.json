@@ -27,6 +27,25 @@
         "type": "string"
       }
     },
+    "throttle": {
+      "type": "object",
+      "description": "Global default API Gateway throttle settings for all stages and APIs (can be overridden at stage or API level)",
+      "properties": {
+        "rateLimit": {
+          "type": "number",
+          "description": "Steady-state requests per second",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "burstLimit": {
+          "type": "number",
+          "description": "Maximum burst capacity",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "additionalProperties": false
+    },
     "exports": {
       "type": "array",
       "description": "Array of API Gateway and SNS resources to manage",

@@ -2,6 +2,10 @@
   "app": "ccfw",
   "account": "907688428238",
   "region": "us-east-1",
+  "throttle": {
+    "rateLimit": 100,
+    "burstLimit": 200
+  },
   "environment": {
     "DDB_ADS_TABLE_NAME": "!ImportValue ccfw-ads-table",
     "DDB_APPOINTMENTS_TABLE_NAME": "!ImportValue ccfw-appointments-table",
@@ -125,10 +129,6 @@
     },
     {
       "stage": "staging",
-      "throttle": {
-        "rateLimit": 100,
-        "burstLimit": 200
-      },
       "mapping": {
         "domain": "api.chicagocenterforwomen.com",
         "path": "staging"
@@ -139,10 +139,6 @@
     },
     {
       "stage": "tools",
-      "throttle": {
-        "rateLimit": 50,
-        "burstLimit": 100
-      },
       "mapping": {
         "domain": "api.chicagocenterforwomen.com",
         "path": "tools"
