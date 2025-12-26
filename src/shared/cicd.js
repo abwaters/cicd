@@ -363,6 +363,7 @@ async function processApiGatewayFunctions(stage,appAlias,commit,apiFilter)
 async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
     const account = await getConfig("account");
     const region = await getConfig("region");
+    const globalThrottle = await getConfig("throttle");
     const stageConfig = await getStageConfig(stage);
     const apis = await getExportsByType('api',apiFilter);
     console.log(`\n * Updating apis to deploy stage and ensure custom domain mappings:`);
@@ -378,14 +379,22 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
             console.log(`   - using deployment '${deployment.id}'`);
         }
 
-        // Resolve throttle settings: API-level overrides stage-level defaults
+        // Resolve throttle settings: API-level > stage-level > global defaults
         let throttleSettings = null;
+        let throttleSource = null;
         if (api.throttle) {
             throttleSettings = api.throttle;
-            console.log(`   - using API-specific throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
+            throttleSource = 'API-specific';
         } else if (stageConfig.throttle) {
             throttleSettings = stageConfig.throttle;
-            console.log(`   - using stage-level throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
+            throttleSource = 'stage-level';
+        } else if (globalThrottle) {
+            throttleSettings = globalThrottle;
+            throttleSource = 'global';
+        }
+
+        if (throttleSettings) {
+            console.log(`   - using ${throttleSource} throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
         } else {
             console.log(`   - no throttle settings configured (using AWS defaults)`);
         }
