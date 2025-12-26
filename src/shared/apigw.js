@@ -52,10 +52,10 @@ async function createDeployment(apiId,commit) {
     return null;
 }
 
-async function createStage(apiId, stageName, deploymentId, commit) {
+async function createStage(apiId, stageName, deploymentId, commit, throttleSettings) {
     const app = await config.getConfig('app');
     try {
-        const command = new CreateStageCommand({
+        const commandParams = {
             restApiId: apiId,
             stageName: stageName,
             deploymentId: deploymentId,
@@ -66,7 +66,17 @@ async function createStage(apiId, stageName, deploymentId, commit) {
                 Name: app,
                 Commit: commit
             }
-        });
+        };
+
+        // Add throttle settings if provided
+        if (throttleSettings && (throttleSettings.rateLimit !== undefined || throttleSettings.burstLimit !== undefined)) {
+            commandParams.throttleSettings = {
+                rateLimit: throttleSettings.rateLimit,
+                burstLimit: throttleSettings.burstLimit
+            };
+        }
+
+        const command = new CreateStageCommand(commandParams);
         await utils.sleep();
         const apiClient = await getClient();
         const response = await apiClient.send(command);
@@ -130,30 +140,50 @@ async function listStages(restApiId) {
     }
 }
 
-async function updateStage(restApiId, stageName, deploymentId, commit) {
+async function updateStage(restApiId, stageName, deploymentId, commit, throttleSettings) {
     const app = await config.getConfig('app');
     const region = await config.getConfig('region');
     try {
+        const patchOperations = [
+            {
+                op: "replace",
+                path: "/deploymentId",
+                value: deploymentId
+            },
+            {
+                op: "replace",
+                path: "/description",
+                value: commit
+            },
+            {
+                op: "replace",
+                path: "/variables/Commit",
+                value: commit
+            }
+        ];
+
+        // Add throttle patch operations if provided
+        if (throttleSettings) {
+            if (throttleSettings.rateLimit !== undefined) {
+                patchOperations.push({
+                    op: "replace",
+                    path: "/throttle/rateLimit",
+                    value: String(throttleSettings.rateLimit)
+                });
+            }
+            if (throttleSettings.burstLimit !== undefined) {
+                patchOperations.push({
+                    op: "replace",
+                    path: "/throttle/burstLimit",
+                    value: String(throttleSettings.burstLimit)
+                });
+            }
+        }
+
         const command = new UpdateStageCommand({
             restApiId: restApiId,
             stageName: stageName,
-            patchOperations: [
-                {
-                    op: "replace",
-                    path: "/deploymentId",
-                    value: deploymentId
-                },
-                {
-                    op: "replace",
-                    path: "/description",
-                    value: commit
-                },
-                {
-                    op: "replace",
-                    path: "/variables/Commit",
-                    value: commit
-                }
-            ]
+            patchOperations: patchOperations
         });
 
         const apiClient = await getClient();

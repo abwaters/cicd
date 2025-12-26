@@ -2,6 +2,10 @@
   "app": "ccfw",
   "account": "907688428238",
   "region": "us-east-1",
+  "throttle": {
+    "rateLimit": 100,
+    "burstLimit": 200
+  },
   "environment": {
     "DDB_ADS_TABLE_NAME": "!ImportValue ccfw-ads-table",
     "DDB_APPOINTMENTS_TABLE_NAME": "!ImportValue ccfw-appointments-table",
@@ -65,6 +69,10 @@
       "type": "api",
       "name": "ccfw-slack-api",
       "path": "slack",
+      "throttle": {
+        "rateLimit": 10,
+        "burstLimit": 20
+      },
       "functions": [
         {"name": "ccfw-slack-dispatch-function","method": "POST","concurrency":0,"env": "SLACK_COMMAND_TOPIC,SLACK_BOT_TOKEN,SLACK_SIGNING_SECRET"},
         {"name": "ccfw-slack-events-function","method": "POST","concurrency":0,"env": "SLACK_COMMAND_TOPIC,SLACK_BOT_TOKEN,SLACK_SIGNING_SECRET"},
@@ -107,6 +115,10 @@
   "stages": [
     {
       "stage": "prod",
+      "throttle": {
+        "rateLimit": 1000,
+        "burstLimit": 2000
+      },
       "mapping": {
         "domain": "api.chicagocenterforwomen.com",
         "path": ""
