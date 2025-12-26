@@ -363,6 +363,7 @@ async function processApiGatewayFunctions(stage,appAlias,commit,apiFilter)
 async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
     const account = await getConfig("account");
     const region = await getConfig("region");
+    const globalThrottle = await getConfig("throttle");
     const stageConfig = await getStageConfig(stage);
     const apis = await getExportsByType('api',apiFilter);
     console.log(`\n * Updating apis to deploy stage and ensure custom domain mappings:`);
@@ -378,15 +379,39 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
             console.log(`   - using deployment '${deployment.id}'`);
         }
 
+        // Resolve throttle settings: API-level > stage-level > global defaults
+        let throttleSettings = null;
+        let throttleSource = null;
+        if (api.throttle) {
+            throttleSettings = api.throttle;
+            throttleSource = 'API-specific';
+        } else if (stageConfig.throttle) {
+            throttleSettings = stageConfig.throttle;
+            throttleSource = 'stage-level';
+        } else if (globalThrottle) {
+            throttleSettings = globalThrottle;
+            throttleSource = 'global';
+        }
+
+        // Validate throttle settings before using them
+        if (throttleSettings &&
+            throttleSettings.rateLimit !== undefined &&
+            throttleSettings.burstLimit !== undefined) {
+            console.log(`   - using ${throttleSource} throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
+        } else {
+            console.log(`   - no throttle settings configured (using AWS defaults)`);
+            throttleSettings = null;  // Ensure we don't pass partial config to AWS
+        }
+
         const currentStage = await findStages(apiId,stage);
         if( currentStage ) {
             console.log(`   - updating existing stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
             await utils.sleep();
-            await apigw.updateStage(apiId,stage,deployment.id,appAlias);
+            await apigw.updateStage(apiId,stage,deployment.id,appAlias,throttleSettings);
         }else{
             console.log(`   - creating stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
             await utils.sleep();
-            await apigw.createStage(apiId,stage,deployment.id,appAlias);
+            await apigw.createStage(apiId,stage,deployment.id,appAlias,throttleSettings);
         }
 
         let path = api.path;
