@@ -378,15 +378,27 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
             console.log(`   - using deployment '${deployment.id}'`);
         }
 
+        // Resolve throttle settings: API-level overrides stage-level defaults
+        let throttleSettings = null;
+        if (api.throttle) {
+            throttleSettings = api.throttle;
+            console.log(`   - using API-specific throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
+        } else if (stageConfig.throttle) {
+            throttleSettings = stageConfig.throttle;
+            console.log(`   - using stage-level throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
+        } else {
+            console.log(`   - no throttle settings configured (using AWS defaults)`);
+        }
+
         const currentStage = await findStages(apiId,stage);
         if( currentStage ) {
             console.log(`   - updating existing stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
             await utils.sleep();
-            await apigw.updateStage(apiId,stage,deployment.id,appAlias);
+            await apigw.updateStage(apiId,stage,deployment.id,appAlias,throttleSettings);
         }else{
             console.log(`   - creating stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
             await utils.sleep();
-            await apigw.createStage(apiId,stage,deployment.id,appAlias);
+            await apigw.createStage(apiId,stage,deployment.id,appAlias,throttleSettings);
         }
 
         let path = api.path;

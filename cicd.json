@@ -65,6 +65,10 @@
       "type": "api",
       "name": "ccfw-slack-api",
       "path": "slack",
+      "throttle": {
+        "rateLimit": 10,
+        "burstLimit": 20
+      },
       "functions": [
         {"name": "ccfw-slack-dispatch-function","method": "POST","concurrency":0,"env": "SLACK_COMMAND_TOPIC,SLACK_BOT_TOKEN,SLACK_SIGNING_SECRET"},
         {"name": "ccfw-slack-events-function","method": "POST","concurrency":0,"env": "SLACK_COMMAND_TOPIC,SLACK_BOT_TOKEN,SLACK_SIGNING_SECRET"},
@@ -107,6 +111,10 @@
   "stages": [
     {
       "stage": "prod",
+      "throttle": {
+        "rateLimit": 1000,
+        "burstLimit": 2000
+      },
       "mapping": {
         "domain": "api.chicagocenterforwomen.com",
         "path": ""
@@ -117,6 +125,10 @@
     },
     {
       "stage": "staging",
+      "throttle": {
+        "rateLimit": 100,
+        "burstLimit": 200
+      },
       "mapping": {
         "domain": "api.chicagocenterforwomen.com",
         "path": "staging"
@@ -127,6 +139,10 @@
     },
     {
       "stage": "tools",
+      "throttle": {
+        "rateLimit": 50,
+        "burstLimit": 100
+      },
       "mapping": {
         "domain": "api.chicagocenterforwomen.com",
         "path": "tools"

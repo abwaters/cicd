@@ -51,6 +51,25 @@
                 "description": "Base path for API endpoints",
                 "minLength": 1
               },
+              "throttle": {
+                "type": "object",
+                "description": "API-specific throttle settings (overrides stage-level defaults)",
+                "properties": {
+                  "rateLimit": {
+                    "type": "number",
+                    "description": "Steady-state requests per second",
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  "burstLimit": {
+                    "type": "number",
+                    "description": "Maximum burst capacity",
+                    "minimum": 0,
+                    "maximum": 10000
+                  }
+                },
+                "additionalProperties": false
+              },
               "functions": {
                 "type": "array",
                 "description": "Lambda functions to integrate with this API",
@@ -133,6 +152,25 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "throttle": {
+            "type": "object",
+            "description": "Default API Gateway throttle settings for all APIs in this stage (can be overridden per-API)",
+            "properties": {
+              "rateLimit": {
+                "type": "number",
+                "description": "Steady-state requests per second",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "burstLimit": {
+                "type": "number",
+                "description": "Maximum burst capacity",
+                "minimum": 0,
+                "maximum": 10000
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
