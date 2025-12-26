@@ -393,10 +393,14 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
             throttleSource = 'global';
         }
 
-        if (throttleSettings) {
+        // Validate throttle settings before using them
+        if (throttleSettings &&
+            throttleSettings.rateLimit !== undefined &&
+            throttleSettings.burstLimit !== undefined) {
             console.log(`   - using ${throttleSource} throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
         } else {
             console.log(`   - no throttle settings configured (using AWS defaults)`);
+            throttleSettings = null;  // Ensure we don't pass partial config to AWS
         }
 
         const currentStage = await findStages(apiId,stage);
