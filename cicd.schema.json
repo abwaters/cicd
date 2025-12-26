@@ -30,6 +30,7 @@
     "throttle": {
       "type": "object",
       "description": "Global default API Gateway throttle settings for all stages and APIs (can be overridden at stage or API level)",
+      "required": ["rateLimit", "burstLimit"],
       "properties": {
         "rateLimit": {
           "type": "number",
@@ -73,6 +74,7 @@
               "throttle": {
                 "type": "object",
                 "description": "API-specific throttle settings (overrides stage-level defaults)",
+                "required": ["rateLimit", "burstLimit"],
                 "properties": {
                   "rateLimit": {
                     "type": "number",
@@ -175,6 +177,7 @@
           "throttle": {
             "type": "object",
             "description": "Default API Gateway throttle settings for all APIs in this stage (can be overridden per-API)",
+            "required": ["rateLimit", "burstLimit"],
             "properties": {
               "rateLimit": {
                 "type": "number",
