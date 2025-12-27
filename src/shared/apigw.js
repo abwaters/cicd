@@ -167,14 +167,14 @@ async function updateStage(restApiId, stageName, deploymentId, commit, throttleS
             if (throttleSettings.rateLimit !== undefined) {
                 patchOperations.push({
                     op: "replace",
-                    path: "/throttle/rateLimit",
+                    path: "/*/*/throttling/rateLimit",
                     value: String(throttleSettings.rateLimit)
                 });
             }
             if (throttleSettings.burstLimit !== undefined) {
                 patchOperations.push({
                     op: "replace",
-                    path: "/throttle/burstLimit",
+                    path: "/*/*/throttling/burstLimit",
                     value: String(throttleSettings.burstLimit)
                 });
             }
