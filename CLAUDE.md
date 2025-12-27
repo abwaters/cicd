@@ -70,6 +70,7 @@ The core orchestration module follows this flow:
 3. **API Gateway Deployment** (`processApiGateway()`)
    - **Functions**: Creates Lambda versions (with commit as description) and aliases (format: `{app}-{commit}`)
    - **APIs**: Creates/updates deployments, stages (with `Commit` variable), and custom domain mappings
+   - **Throttling**: Applies global and stage-specific throttle settings using patch operations
    - **Permissions**: Adds Lambda permissions for API Gateway invocation
 
 4. **SNS Deployment** (`processSNS()`)
@@ -170,3 +171,24 @@ Functions can specify reserved concurrency via `concurrency` field:
 - Value of `0` throttles function (used for Slack APIs to prevent rate limiting)
 - Updates provisioned concurrency after alias creation/update
 - Only applies to API Gateway functions (not SNS functions in current implementation)
+
+### API Gateway Throttling
+
+API Gateway throttling settings can be configured at two levels:
+
+1. **Global throttling**: Defined in API export configuration (`exports[].throttle`)
+   - Applied to all methods/resources in the API
+   - Used as default for all stages
+
+2. **Stage-specific throttling**: Defined in stage configuration (`stages[].throttle`)
+   - Overrides global throttle settings for specific stages
+   - Allows different rate limits for dev/staging/prod environments
+
+**Implementation details** (`apigw.js`):
+- Throttling uses AWS API Gateway patch operations when updating stages
+- Path format: `/*/*/throttling/rateLimit` and `/*/*/throttling/burstLimit`
+- The `/*/*/` prefix applies settings globally to all resource paths and HTTP methods
+- Settings are applied via `UpdateStageCommand` with `patchOperations` array
+- Both `createStage()` and `updateStage()` support throttle settings
+
+**Important**: The path format must be `/*/*/throttling/...` (not `/throttle/...`) as required by AWS API Gateway's method settings specification.
