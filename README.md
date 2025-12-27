@@ -99,6 +99,10 @@ Environment variables support special resolution syntax:
   "type": "api",
   "name": "cf-export-name",           // CloudFormation export name for API ID
   "path": "api-path",                 // Base path
+  "throttle": {                       // Optional: global throttle settings for all methods
+    "rateLimit": 10,                  // Requests per second
+    "burstLimit": 20                  // Maximum concurrent requests
+  },
   "functions": [
     {
       "name": "cf-export-name",       // CloudFormation export name for Lambda ARN
@@ -138,6 +142,10 @@ Environment variables support special resolution syntax:
   },
   "environment": {
     "STAGE_VAR": "value"              // Stage-specific overrides
+  },
+  "throttle": {                       // Optional: stage-specific throttle overrides
+    "rateLimit": 100,                 // Requests per second
+    "burstLimit": 200                 // Maximum concurrent requests
   }
 }
 ```
@@ -216,10 +224,19 @@ cicd validate --verbose
 2. **CloudFormation Resolution**: Resolves CloudFormation exports referenced in config
 3. **Environment Resolution**: Resolves special environment variable syntax
 4. **Lambda Versioning**: Creates Lambda versions and aliases based on Git commit
-5. **API Deployment**: Updates API Gateway deployments and stages
+5. **API Deployment**: Updates API Gateway deployments and stages with throttling settings
 6. **Domain Mapping**: Configures custom domain mappings for stages
 7. **SNS Subscriptions**: Subscribes Lambda functions to SNS topics
 8. **Permission Management**: Updates Lambda permissions for API Gateway and SNS triggers
+
+### Throttling
+
+API Gateway throttling can be configured at two levels:
+
+- **Global (API-level)**: Apply default throttle settings to all methods in an API
+- **Stage-specific**: Override global settings for specific deployment stages
+
+Throttling settings use AWS API Gateway's method-level throttling (`/*/*/throttling/rateLimit` and `/*/*/throttling/burstLimit` paths), which apply globally to all resource paths and HTTP methods in a stage.
 
 ## Versioning
 
