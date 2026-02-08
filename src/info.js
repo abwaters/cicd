@@ -5,6 +5,7 @@ const apigw = require('./shared/apigw');
 const sns = require('./shared/sns');
 const credentials = require('./shared/credentials');
 const logger = require('./shared/logger');
+const { printHeader } = require('./shared/header');
 
 async function main() {
     // Validate AWS credentials before proceeding
@@ -23,6 +24,7 @@ async function main() {
     }
 
     console.time("api cicd");
+    if (!o.noHeader) printHeader();
     console.log(`Collecting information for stages...`);
     const stages = await cicd.getConfig("stages");
     const apis = await cicd.getExportsByType('api');

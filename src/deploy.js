@@ -2,6 +2,7 @@ const cicd = require('./shared/cicd');
 const options = require("./shared/options");
 const credentials = require('./shared/credentials');
 const logger = require('./shared/logger');
+const { printHeader } = require('./shared/header');
 
 const SLEEP_TIME = 2000;
 
@@ -53,6 +54,7 @@ async function main() {
     await cicd.setStageConfig(stage);
 
     console.time("api cicd");
+    if (!o.noHeader) printHeader();
     console.log(`Preparing to deploy commit '${commit}' to '${stage}' stage.`);
 
     if( processEnv ) {
