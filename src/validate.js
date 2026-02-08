@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const options = require('./shared/options');
 const logger = require('./shared/logger');
+const { printHeader } = require('./shared/header');
 
 /**
  * Validates cicd.json against cicd.schema.json
@@ -20,6 +21,8 @@ async function main() {
         logger.setVerbose(true);
         logger.log('Verbose mode enabled');
     }
+
+    if (!o.noHeader) printHeader();
 
     // Load schema
     const schemaPath = path.join(__dirname, '..', 'cicd.schema.json');

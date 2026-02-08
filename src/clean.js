@@ -5,6 +5,7 @@ const cicd = require('./shared/cicd');
 const credentials = require('./shared/credentials');
 const options = require('./shared/options');
 const logger = require('./shared/logger');
+const { printHeader } = require('./shared/header');
 
 async function main() {
     // Validate AWS credentials before proceeding
@@ -24,6 +25,7 @@ async function main() {
     const region = await cicd.getConfig("region");
 
     console.time("api cicd");
+    if (!o.noHeader) printHeader();
     console.log(`Preparing clean api gateway deployments and lambda aliases/versions...`);
 
     // get list of exports from cloudformation

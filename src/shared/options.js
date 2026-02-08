@@ -11,6 +11,11 @@ function camelCaseOption(opt) {
       return ccOpt;
 }
 
+// Map of short flags to their long-form equivalents
+const SHORT_FLAGS = {
+    '-nh': 'noHeader',
+};
+
 function getOptions(args) {
     const options = {};
     for(const arg of args) {
@@ -21,6 +26,8 @@ function getOptions(args) {
             }else{
                 options[camelCaseOption(arg.substring(2))] = true;
             }
+        } else if( SHORT_FLAGS[arg] ) {
+            options[SHORT_FLAGS[arg]] = true;
         }
     }
     if( options.hasOwnProperty('dryRun') && options.dryRun ) {
@@ -30,7 +37,7 @@ function getOptions(args) {
 }
 
 function stripOptions(args) {
-    return args.filter(arg=>!arg.startsWith('--'));
+    return args.filter(arg=>!arg.startsWith('--') && !SHORT_FLAGS[arg]);
 }
 
 module.exports = {getOptions,stripOptions};
