@@ -10,9 +10,6 @@ async function main() {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
 
-    //const subs = await sns.listSubscriptionsByTopic('arn:aws:sns:us-east-1:907688428238:ccfw-command');
-    //process.exit(-1);
-
     const account = await cicd.getConfig("account");
     const region = await cicd.getConfig("region");
     let args = process.argv.slice(2);
@@ -26,7 +23,7 @@ async function main() {
     }
 
     console.time("api cicd");
-    console.log(`Collecting information for stages...\n`);
+    console.log(`Collecting information for stages...`);
     const stages = await cicd.getConfig("stages");
     const apis = await cicd.getExportsByType('api');
     const topics = await cicd.getExportsByType('sns');
@@ -35,7 +32,6 @@ async function main() {
     const functions = [...apiFunctions,...topicFunctions];
     const stagesInfo = {}, funcAliases = new Map(), funcVersions = new Map() ;
     for(const stage of stages) {
-        //console.log(` * preparing stage '${stage.stage}`);
         stagesInfo[stage.stage] = {
             name: stage.stage,
             commits: {},
@@ -45,7 +41,7 @@ async function main() {
 
     for(const api of apis) {
         const apiId = api.value;
-        //console.log(` * Checking api ${api.Name} [${api.Value}]...`);
+        logger.verbose(`   - Checking api ${api.name} [${apiId}]`);
         const apistages = await apigw.listStages(apiId);
         for(const s of apistages) {
             const name = api.name;
@@ -89,28 +85,8 @@ async function main() {
         }
     }
 
-    for(const [stageKey,stageEntry] of Object.entries(stagesInfo) ) {
-        let commits = Object.keys(stageEntry.commits);
-        commits = commits.map(c=>c.split('-')[1]);
-        if( commits.length === 1 ) {
-            const commit = commits[0];
-            console.log(`STAGE: ${stageKey} COMMIT: ${commit}`);
-        }else if( commits.length > 1 ) {
-            console.log(`STAGE: ${stageKey} COMMITS: ${commits.join(",")}`);
-        }else{
-            console.log(`STAGE: ${stageKey} NOT DEPLOYED`);
-        }
-        if( o.details ) {
-            const functions = stageEntry.functions;
-            for(const f of functions) {
-                const funcName = f.name;
-                const funcVersion = f.commit.includes('-')?f.commit.split('-')[1]:f.commit;
-                console.log(`   - ${funcName} [${funcVersion}]`);
-            }
-            console.log();
-        }
-    }
-
+    // Collect SNS topic results
+    const topicResults = [];
     for(const topic of topics) {
         const subs = await sns.listSubscriptionsByTopic(topic.value);
         let commit = '';
@@ -119,12 +95,43 @@ async function main() {
                 const parts = sub.endpoint.split(':');
                 if( parts.length === 8 ) {
                     commit = parts[7].split('-')[1];
+                    logger.verbose(`   - Topic ${topic.name} subscribed to alias '${parts[7]}'`);
                     break;
                 }
             }
         }
-        if( commit ) {
-            console.log(`TOPIC: ${topic.name} COMMIT: ${commit}`);
+        topicResults.push({ name: topic.name, commit: commit || null });
+    }
+
+    // ── Print summary ─────────────────────────────────────────────────
+
+    // Stages
+    console.log(`\nStages:`);
+    for(const [stageKey,stageEntry] of Object.entries(stagesInfo) ) {
+        let commits = Object.keys(stageEntry.commits);
+        commits = commits.map(c=>c.split('-')[1]);
+        if( commits.length === 1 ) {
+            console.log(`  ${stageKey.padEnd(15)} ${commits[0]}`);
+        }else if( commits.length > 1 ) {
+            console.log(`  ${stageKey.padEnd(15)} ${commits.join(', ')}`);
+        }else{
+            console.log(`  ${stageKey.padEnd(15)} not deployed`);
+        }
+        if( o.details ) {
+            const functions = stageEntry.functions;
+            for(const f of functions) {
+                const funcName = f.name;
+                const funcVersion = f.commit.includes('-')?f.commit.split('-')[1]:f.commit;
+                console.log(`    - ${funcName.padEnd(35)} ${funcVersion}`);
+            }
+        }
+    }
+
+    // SNS Topics
+    if (topicResults.length > 0) {
+        console.log(`\nSNS Topics:`);
+        for (const r of topicResults) {
+            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
         }
     }
 
