@@ -304,60 +304,66 @@ async function processFunctionEnvironmentVars() {
     const apiFunctions =  await getLambdaExports('api');
     const snsFunctions =  await getLambdaExports('sns');
     const functions = [...apiFunctions,...snsFunctions];
-    console.log(`\n * Creating environment vars for functions:`);
+    const results = [];
+    logger.verbose(`\n * Creating environment vars for functions:`);
     for(const f of functions) {
         const functionName = f.value;
-        console.log(`   - setting environment vars for function: '${functionName}'...`);
         const funcEnv = await getVars(f.env);
         if( funcEnv ) {
+            logger.verbose(`   - setting environment vars for function: '${functionName}'...`);
             await lambda.updateEnvironmentVariables(functionName,funcEnv);
+            results.push({ name: functionName, updated: true, varCount: Object.keys(funcEnv).length });
         } else {
-            logger.verbose(`     x no vars for this function`);
+            logger.verbose(`     x no vars for '${functionName}'`);
+            results.push({ name: functionName, updated: false, varCount: 0 });
         }
     }
     await utils.sleep(EXTENDED_SLEEP_TIME);
+    return results;
 }
 
 async function processApiGatewayFunctions(stage,appAlias,commit,apiFilter)
 {
     const stageConfig = await getStageConfig(stage);
     const functions =  await getLambdaExports('api',apiFilter);
-    console.log(`\n * Creating versions and aliases for functions:`);
+    const results = [];
+    logger.verbose(`\n * Creating versions and aliases for functions:`);
     for(const f of functions) {
-        console.log(` * Checking function '${f.value}'...`);
+        logger.verbose(` * Checking function '${f.value}'...`);
         const functionName = f.value;
         let version = await findVersion(functionName,commit);
         let alias = await findAlias(functionName,appAlias);
         if( alias ) {
-            console.log(`   - alias for commit '${commit}' exists for function '${functionName}'`);
+            logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
             if( f.concurrency ) {
                 const r = await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
-                console.log(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
+                logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
             }
+            results.push({ name: functionName, action: 'exists', version });
         }else{
             if( !version ) {
                 await utils.sleep();
                 let v = await lambda.publishNewVersion(functionName,appAlias);
                 version = v.version;
-                console.log(`   - using version ${version} for '${commit}'`);
+                logger.verbose(`   - using version ${version} for '${commit}'`);
                 let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                //console.log(arn);
                 await utils.sleep();
                 let tags = await lambda.listFunctionTags(arn);
-                //console.log(tags);
                 if( tags.Commit !== commit ) {
-                    console.log(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
+                    logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
                 }
             }
             await utils.sleep();
             const r = await lambda.createAlias(functionName,appAlias,version);
-            console.log(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
+            logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
             if( f.concurrency ) {
                 const r = await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
-                console.log(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
+                logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
             }
+            results.push({ name: functionName, action: 'created', version });
         }
     }
+    return results;
 }
 
 async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
@@ -366,17 +372,20 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
     const globalThrottle = await getConfig("throttle");
     const stageConfig = await getStageConfig(stage);
     const apis = await getExportsByType('api',apiFilter);
-    console.log(`\n * Updating apis to deploy stage and ensure custom domain mappings:`);
+    const results = [];
+    logger.verbose(`\n * Updating apis to deploy stage and ensure custom domain mappings:`);
     for(const api of apis) {
         const apiId = api.value;
-        console.log(` * Checking api ${api.name} [${api.value}]...`);
+        logger.verbose(` * Checking api ${api.name} [${api.value}]...`);
+        let deploymentAction = 'existing';
         let deployment = await findDeployment(apiId,commit);
         if( !deployment ) {
             await utils.sleep();
             deployment = await apigw.createDeployment(apiId,commit);
-            console.log(`   - created deployment '${deployment.id}'`);
+            logger.verbose(`   - created deployment '${deployment.id}'`);
+            deploymentAction = 'created';
         }else{
-            console.log(`   - using deployment '${deployment.id}'`);
+            logger.verbose(`   - using deployment '${deployment.id}'`);
         }
 
         // Resolve throttle settings: API-level > stage-level > global defaults
@@ -394,119 +403,135 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
         }
 
         // Validate throttle settings before using them
+        let throttleLabel = 'none';
         if (throttleSettings &&
             throttleSettings.rateLimit !== undefined &&
             throttleSettings.burstLimit !== undefined) {
-            console.log(`   - using ${throttleSource} throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
+            logger.verbose(`   - using ${throttleSource} throttle: ${throttleSettings.rateLimit} req/s, ${throttleSettings.burstLimit} burst`);
+            throttleLabel = `${throttleSource} (${throttleSettings.rateLimit}/${throttleSettings.burstLimit})`;
         } else {
-            console.log(`   - no throttle settings configured (using AWS defaults)`);
+            logger.verbose(`   - no throttle settings configured (using AWS defaults)`);
             throttleSettings = null;  // Ensure we don't pass partial config to AWS
         }
 
+        let stageAction = 'updated';
         const currentStage = await findStages(apiId,stage);
         if( currentStage ) {
-            console.log(`   - updating existing stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
+            logger.verbose(`   - updating existing stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
             await utils.sleep();
             await apigw.updateStage(apiId,stage,deployment.id,appAlias,throttleSettings);
         }else{
-            console.log(`   - creating stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
+            logger.verbose(`   - creating stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
             await utils.sleep();
             await apigw.createStage(apiId,stage,deployment.id,appAlias,throttleSettings);
+            stageAction = 'created';
         }
 
         let path = api.path;
         if( stageConfig.mapping.path ) {
             path = stageConfig.mapping.path + "/" + path;
         }
+        let mappingAction = 'existing';
         const m = await findMapping(stageConfig.mapping.domain,apiId,stage);
         if( m ) {
-            console.log(`   - using existing mapping for ${stageConfig.mapping.domain} with path '${path}'`);
+            logger.verbose(`   - using existing mapping for ${stageConfig.mapping.domain} with path '${path}'`);
         }else{
-            console.log(`   - create mapping for ${stageConfig.mapping.domain} with path '${path}'`);
+            logger.verbose(`   - create mapping for ${stageConfig.mapping.domain} with path '${path}'`);
             try {
                 await utils.sleep();
                 await apigw.createCustomDomainMappingV2(stageConfig.mapping.domain,apiId,stage,path);
+                mappingAction = 'created';
             }catch(e) {
-                console.log(`   x mapping for ${stageConfig.mapping.domain} with path '${path}' already exists`);
+                logger.verbose(`   x mapping for ${stageConfig.mapping.domain} with path '${path}' already exists`);
             }
         }
 
         // arn:aws:lambda:us-west-2:XXXXXXXXXXXXX:function:GetHelloWithName
         // update permissions for functions
         for(const f of api.functions) {
-            console.log(`   - updating permissions for '${f.name}'`);
+            logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
             let sourceArn = `arn:aws:execute-api:${region}:${account}:${apiId}/*/${f.method}/*`;
             await utils.sleep();
             await lambda.addFunctionPermission(functionArn, sourceArn,'apigateway.amazonaws.com');
         }
+
+        results.push({
+            name: api.name,
+            deployment: deploymentAction,
+            stage: stageAction,
+            mapping: mappingAction,
+            throttle: throttleLabel,
+            functions: api.functions.length
+        });
     }
+    return results;
 }
 
 async function processApiGateway(stage,appAlias,commit,apiFilter) {
-    await processApiGatewayFunctions(stage,appAlias,commit,apiFilter);
-    await processApiGatewayApis(stage,appAlias,commit,apiFilter);
+    const functions = await processApiGatewayFunctions(stage,appAlias,commit,apiFilter);
+    const apis = await processApiGatewayApis(stage,appAlias,commit,apiFilter);
+    return { functions, apis };
 }
 
 async function processSNSFunctions(stage,appAlias,commit) {
     const functions =  await getLambdaExports('sns');
-    console.log(`\nCreating versions and aliases for functions:`);
+    const results = [];
+    logger.verbose(`\nCreating versions and aliases for functions:`);
     for(const f of functions) {
-        console.log(` * Checking function '${f.value}'...`);
+        logger.verbose(` * Checking function '${f.value}'...`);
         const functionName = f.value;
         let version = await findVersion(functionName,commit);
         let alias = await findAlias(functionName,appAlias);
         if( alias ) {
-            console.log(`   - alias for commit '${commit}' exists for function '${functionName}'`);
+            logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
+            results.push({ name: functionName, action: 'exists', version });
         }else if( !alias ) {
             if( !version ) {
                 await utils.sleep();
                 let v = await lambda.publishNewVersion(functionName,appAlias);
                 version = v.version;
-                console.log(`   - using version ${version} for '${commit}'`);
+                logger.verbose(`   - using version ${version} for '${commit}'`);
                 let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                //console.log(arn);
                 await utils.sleep();
                 let tags = await lambda.listFunctionTags(arn);
-                //console.log(tags);
                 if( tags.Commit !== commit ) {
-                    console.log(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
+                    logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
                 }
             }
             await utils.sleep();
             const r = await lambda.createAlias(functionName,appAlias,version);
-            console.log(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
+            logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
+            results.push({ name: functionName, action: 'created', version });
         }
     }
+    return results;
 }
 
 async function processSNSSubscriptions(stage,appAlias,commit) {
     const account = await getConfig("account");
     const region = await getConfig("region");
     const topics = await getExportsByType('sns');
-    console.log(`\n * Updating apis to deploy stage and ensure custom domain mappings:`);
+    const results = [];
+    logger.verbose(`\n * Updating SNS subscriptions:`);
     for(const topic of topics) {
 
         // checking sns for stage
         if( topic.hasOwnProperty('stages') ) {
             if( !topic.stages.includes(stageConfig.stage) ) {
-                console.log(`   - skipping '${topic.name}' in '${stageConfig.stage}'`);
+                logger.verbose(`   - skipping '${topic.name}' in '${stageConfig.stage}'`);
+                results.push({ name: topic.name, action: 'skipped' });
                 continue;
             }
         }
 
-        // subscribe functions
-        // update function permissions
-        // arn:aws:lambda:us-west-2:XXXXXXXXXXXXX:function:GetHelloWithName
-        // update permissions for functions
+        let oldRemoved = 0;
         for(const f of topic.functions) {
-            console.log(`   - updating permissions for '${f.name}'`);
-            //const functionName = functionMap.get(f.name).value;
+            logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
             await utils.sleep(EXTENDED_SLEEP_TIME);
-            //console.log(`${topic.value} - ${functionName} - ${functionArn}`);
             await lambda.addFunctionPermission(functionArn, topic.value,'sns.amazonaws.com');
 
             // cleaning up existing subscriptions
@@ -514,25 +539,29 @@ async function processSNSSubscriptions(stage,appAlias,commit) {
             for(const subscription of subscriptions) {
                 const parts = subscription.endpoint.split(':');
                 if( parts.length === 8 && parts[7] !== appAlias ) {
-                    console.log(`   - deleting old subscription to SNS topic '${topic.name}'`);
+                    logger.verbose(`   - deleting old subscription to SNS topic '${topic.name}'`);
                     await sns.deleteSubscription(subscription.subscriptionArn);
+                    oldRemoved++;
                 }
             }
 
-            console.log(`   - subscribing lambda to SNS topic '${topic.name}'`);
+            logger.verbose(`   - subscribing lambda to SNS topic '${topic.name}'`);
             await sns.subscribeLambdaToTopic(topic.value,functionArn);
         }
+        results.push({ name: topic.name, action: 'subscribed', oldRemoved });
     }
+    return results;
 }
 
 async function processSNS(stage,appAlias,commit) {
     const topics = await getExportsByType('sns');
     if (topics.length === 0) {
-        return;
+        return null;
     }
-    console.log(`\nUpdating sns topics:`);
-    await processSNSFunctions(stage,appAlias,commit);
-    await processSNSSubscriptions(stage,appAlias,commit);
+    logger.verbose(`\nUpdating sns topics:`);
+    const functions = await processSNSFunctions(stage,appAlias,commit);
+    const subscriptions = await processSNSSubscriptions(stage,appAlias,commit);
+    return { functions, subscriptions };
 }
 
 module.exports = {
