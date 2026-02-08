@@ -84,7 +84,7 @@ async function main() {
                 const stageNames = activeDeployments.get(d.id);
                 logger.verbose(`   - Deployment '${d.id}' active (${stageNames.join(', ')})`);
                 activeCount++;
-                activeStageLabels.push(stageNames.join('/'));
+                activeStageLabels.push(stageNames.sort().join('/'));
             }
         }
         apiResults.push({ name: api.name, removed, activeCount, activeStageLabels });
@@ -165,7 +165,7 @@ async function main() {
         console.log(`\nAPI Deployments:`);
         for (const r of apiResults) {
             const activeLabel = r.activeStageLabels.length > 0
-                ? `  ${r.activeCount} active (${r.activeStageLabels.join(', ')})`
+                ? `  ${r.activeCount} active (${r.activeStageLabels.sort().join(', ')})`
                 : '';
             console.log(`  ${r.name.padEnd(40)} ${String(r.removed).padStart(3)} removed${activeLabel}`);
         }

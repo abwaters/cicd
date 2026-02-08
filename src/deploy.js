@@ -55,19 +55,93 @@ async function main() {
 
     console.time("api cicd");
     if (!o.noHeader) printHeader();
-    console.log(`Preparing to deploy commit '${commit}' to '${stage}' stage.`);
+    console.log(`Deploying commit '${commit}' to '${stage}' stage...`);
+
+    let envResults = null;
+    let apiResults = null;
+    let snsResults = null;
 
     if( processEnv ) {
-        await cicd.processFunctionEnvironmentVars();
+        envResults = await cicd.processFunctionEnvironmentVars();
     }
 
     if( processApi ) {
-        await cicd.processApiGateway(stage,appAlias,commit,apiFilter);
+        apiResults = await cicd.processApiGateway(stage,appAlias,commit,apiFilter);
     }
 
     if( processSns ) {
-        await cicd.processSNS(stage,appAlias,commit);
+        snsResults = await cicd.processSNS(stage,appAlias,commit);
     }
+
+    // ── Print summary ─────────────────────────────────────────────────
+
+    // Environment Variables
+    if (envResults && envResults.length > 0) {
+        console.log(`\nEnvironment Variables:`);
+        for (const r of envResults) {
+            const status = r.updated ? `${r.varCount} vars` : 'skipped';
+            console.log(`  ${r.name.padEnd(40)} ${status}`);
+        }
+    }
+
+    // API Functions
+    if (apiResults && apiResults.functions.length > 0) {
+        console.log(`\nAPI Functions:`);
+        for (const r of apiResults.functions) {
+            const versionLabel = r.version ? `v${r.version}` : '';
+            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
+        }
+    }
+
+    // API Deployments
+    if (apiResults && apiResults.apis.length > 0) {
+        console.log(`\nAPI Deployments:`);
+        for (const r of apiResults.apis) {
+            console.log(`  ${r.name.padEnd(40)} deployment ${r.deployment.padEnd(10)} stage ${r.stage.padEnd(10)} mapping ${r.mapping}`);
+        }
+    }
+
+    // SNS Functions
+    if (snsResults && snsResults.functions.length > 0) {
+        console.log(`\nSNS Functions:`);
+        for (const r of snsResults.functions) {
+            const versionLabel = r.version ? `v${r.version}` : '';
+            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
+        }
+    }
+
+    // SNS Subscriptions
+    if (snsResults && snsResults.subscriptions.length > 0) {
+        console.log(`\nSNS Subscriptions:`);
+        for (const r of snsResults.subscriptions) {
+            if (r.action === 'skipped') {
+                console.log(`  ${r.name.padEnd(40)} skipped`);
+            } else {
+                const oldLabel = r.oldRemoved > 0 ? `  ${r.oldRemoved} old removed` : '';
+                console.log(`  ${r.name.padEnd(40)} subscribed${oldLabel}`);
+            }
+        }
+    }
+
+    // Summary line
+    const parts = [];
+    if (envResults) {
+        const updated = envResults.filter(r => r.updated).length;
+        parts.push(`${updated} functions configured`);
+    }
+    if (apiResults) {
+        const created = apiResults.functions.filter(r => r.action === 'created').length;
+        const existing = apiResults.functions.filter(r => r.action === 'exists').length;
+        parts.push(`${apiResults.apis.length} APIs deployed (${created} new, ${existing} existing)`);
+    }
+    if (snsResults) {
+        const subscribed = snsResults.subscriptions.filter(r => r.action === 'subscribed').length;
+        const skipped = snsResults.subscriptions.filter(r => r.action === 'skipped').length;
+        if (subscribed > 0 || skipped > 0) {
+            parts.push(`${subscribed} topics subscribed${skipped > 0 ? `, ${skipped} skipped` : ''}`);
+        }
+    }
+    console.log(`\nSummary: ${parts.join(', ')}`);
 
     console.log();
     console.timeEnd("api cicd");
