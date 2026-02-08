@@ -32,88 +32,161 @@ async function main() {
     const apiFunctions = await cicd.getLambdaExports('api');
     const snsFunctions = await cicd.getLambdaExports('sns');
     const functions = [...apiFunctions,...snsFunctions];
-    const apiCount = apis.length, functionCount = functions.length;
     let activeCommits = new Map(),
         deletedDeployments=0,
         deletedAliases=0,
         deletedVersions=0;
 
-    console.log(`\nChecking apis to clean unused deployments:`);
+    // Map commit -> array of stage names (for the summary)
+    const commitStages = new Map();
+
+    // Per-API results for summary
+    const apiResults = [];
+
+    // ── Phase 1: Scan API stages & clean deployments ──────────────────
     for(const api of apis) {
         const apiId = api.value;
-        console.log(` * Checking api ${api.name} [${api.value}]...`);
         const stages = await apigw.listStages(apiId);
         const activeDeployments = new Map();
         for(const s of stages) {
-            activeCommits.set(s.variables.Commit,true);
-            if( !activeDeployments.has(s.deploymentId) ) {
-                activeDeployments.set(s.deploymentId,`'${s.stageName}'`);
-            }else{
-                const v = activeDeployments.get(s.deploymentId);
-                activeDeployments.set(s.deploymentId,` and '${s.stageName}'`);
+            const commit = s.variables.Commit;
+            activeCommits.set(commit, true);
+
+            // Track commit -> stages mapping
+            if (!commitStages.has(commit)) {
+                commitStages.set(commit, []);
+            }
+            if (!commitStages.get(commit).includes(s.stageName)) {
+                commitStages.get(commit).push(s.stageName);
+            }
+
+            // Accumulate stage names per deployment (fixes bug where second stage replaced first)
+            if (!activeDeployments.has(s.deploymentId)) {
+                activeDeployments.set(s.deploymentId, [s.stageName]);
+            } else {
+                activeDeployments.get(s.deploymentId).push(s.stageName);
             }
         }
 
         const deployments = await apigw.listDeployments(apiId);
+        let removed = 0;
+        let activeCount = 0;
+        const activeStageLabels = [];
         for(const d of deployments) {
-            if( !activeDeployments.has(d.id) ) {
-                console.log(`   - Deployment '${d.id}' can be deleted.`);
-                await apigw.deleteDeployment(apiId,d.id);
+            if (!activeDeployments.has(d.id)) {
+                logger.verbose(`   - Deployment '${d.id}' deleted from ${api.name}`);
+                await apigw.deleteDeployment(apiId, d.id);
                 deletedDeployments++;
-            }else{
-                console.log(`   - Deployment '${d.id}' is being used by stage ${activeDeployments.get(d.id)}.`);
+                removed++;
+            } else {
+                const stageNames = activeDeployments.get(d.id);
+                logger.verbose(`   - Deployment '${d.id}' active (${stageNames.join(', ')})`);
+                activeCount++;
+                activeStageLabels.push(stageNames.join('/'));
             }
         }
+        apiResults.push({ name: api.name, removed, activeCount, activeStageLabels });
     }
 
-    console.log(`\nChecking sns topics to clean versions and aliases:`);
+    // ── Phase 2: Scan SNS topics ──────────────────────────────────────
+    const topicResults = [];
     for(const topic of topics) {
-        console.log(` * Checking topic ${topic.name}...`);
         const subscriptions = await sns.listSubscriptionsByTopic(topic.value);
+        let topicCommit = null;
         for(const subscription of subscriptions) {
             const f = await lambda.describeFunction(subscription.endpoint);
-            // arn:aws:lambda:us-east-1:123456789012:function:myapp-slack-command:myapp-feef524af
             const parts = subscription.endpoint.split(':');
-            if( parts.length === 8 ) {
-                console.log(`   - Lambda alias '${parts[7]}' is being used by topic.`);
-                activeCommits.set(parts[7],true);
+            if (parts.length === 8) {
+                logger.verbose(`   - Lambda alias '${parts[7]}' active on ${topic.name}`);
+                activeCommits.set(parts[7], true);
+                topicCommit = parts[7];
+
+                // Track commit -> stages mapping for SNS
+                if (!commitStages.has(parts[7])) {
+                    commitStages.set(parts[7], []);
+                }
             }
         }
+        topicResults.push({ name: topic.name, commit: topicCommit });
     }
 
-    console.log(`\nCheck functions to clean unused aliases and versions:`);
+    // ── Phase 3: Clean Lambda aliases & versions ──────────────────────
+    const functionResults = [];
     for(const f of functions) {
-        console.log(` * Checking function '${f.value}'...`);
         const functionName = f.value;
         const activeVersions = new Map();
+        let aliasesRemoved = 0, versionsRemoved = 0, activeCount = 0;
+
         const aliases = await lambda.listAliases(functionName);
         for(const a of aliases) {
-            if( activeCommits.has(a.alias) ) {
-                console.log(`   - Active alias '${a.alias}'.`);
-                activeVersions.set(a.version,true);
-            }else{
-                console.log(`   - Inactive alias '${a.alias}' will be deleted.`);
-                await lambda.deleteAlias(functionName,a.alias);
+            if (activeCommits.has(a.alias)) {
+                logger.verbose(`   - Active alias '${a.alias}' on ${functionName}`);
+                activeVersions.set(a.version, true);
+                activeCount++;
+            } else {
+                logger.verbose(`   - Deleted alias '${a.alias}' from ${functionName}`);
+                await lambda.deleteAlias(functionName, a.alias);
                 deletedAliases++;
+                aliasesRemoved++;
             }
         }
 
         const versions = await lambda.listVersions(functionName);
         for(const v of versions) {
-            if( v.version === '$LATEST' ) {
+            if (v.version === '$LATEST') {
                 continue;
             }
-            if( activeVersions.has(v.version) ) {
-                console.log(`   - Active version '${v.version}'.`);
-            }else{
-                console.log(`   - Inactive version '${v.version}' will be deleted.`);
-                await lambda.deleteVersion(functionName,v.version);
+            if (activeVersions.has(v.version)) {
+                logger.verbose(`   - Active version '${v.version}' on ${functionName}`);
+            } else {
+                logger.verbose(`   - Deleted version '${v.version}' from ${functionName}`);
+                await lambda.deleteVersion(functionName, v.version);
                 deletedVersions++;
+                versionsRemoved++;
             }
         }
+        functionResults.push({ name: functionName, aliasesRemoved, versionsRemoved, activeCount });
     }
-    console.log(`\nDeleted ${deletedDeployments} deployments for ${apiCount} apis.`);
-    console.log(`Deleted ${deletedAliases} aliases and ${deletedVersions} versions for ${functionCount} functions.\n`);
+
+    // ── Print summary ─────────────────────────────────────────────────
+
+    // Active commits
+    console.log(`\nActive commits:`);
+    // Group by commit, show stages
+    for (const [commit, stages] of commitStages) {
+        const stageLabel = stages.length > 0 ? stages.join(', ') : 'sns';
+        console.log(`  ${stageLabel.padEnd(20)} : ${commit}`);
+    }
+
+    // API Deployments
+    if (apiResults.length > 0) {
+        console.log(`\nAPI Deployments:`);
+        for (const r of apiResults) {
+            const activeLabel = r.activeStageLabels.length > 0
+                ? `  ${r.activeCount} active (${r.activeStageLabels.join(', ')})`
+                : '';
+            console.log(`  ${r.name.padEnd(40)} ${String(r.removed).padStart(3)} removed${activeLabel}`);
+        }
+    }
+
+    // SNS Topics
+    if (topicResults.length > 0) {
+        console.log(`\nSNS Topics:`);
+        for (const r of topicResults) {
+            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
+        }
+    }
+
+    // Lambda Functions
+    if (functionResults.length > 0) {
+        console.log(`\nLambda Functions:`);
+        for (const r of functionResults) {
+            console.log(`  ${r.name.padEnd(35)} ${String(r.aliasesRemoved).padStart(3)} aliases removed  ${String(r.versionsRemoved).padStart(3)} versions removed  ${r.activeCount} active`);
+        }
+    }
+
+    // Final summary
+    console.log(`\nSummary: Removed ${deletedDeployments} deployments, ${deletedAliases} aliases, ${deletedVersions} versions`);
     console.log();
     console.timeEnd("api cicd");
 }
