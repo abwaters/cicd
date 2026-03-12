@@ -1,6 +1,7 @@
 const lambda = require("./lambda");
 const apigw = require("./apigw");
 const sns = require("./sns");
+const twilio = require("./twilio");
 const utils = require('./utils');
 const cf = require('./cloudformation');
 const ps = require('./ps');
@@ -564,6 +565,54 @@ async function processSNS(stage,appAlias,commit) {
     return { functions, subscriptions };
 }
 
+async function processTwilio(stage) {
+    if (!stageConfig || !stageConfig.twilio) {
+        return null;
+    }
+
+    const twilioConfig = stageConfig.twilio;
+
+    // Read Twilio credentials from envCache
+    const accountSid = envCache.get('TWILIO_ACCOUNT_SID');
+    const authToken = envCache.get('TWILIO_AUTH_TOKEN');
+    if (!accountSid || !authToken) {
+        logger.verbose(`   - Twilio credentials not found in environment, skipping`);
+        return null;
+    }
+
+    // Look up the API export to get its path
+    const apiExport = exportMap.get(twilioConfig.smsWebhookApi);
+    if (!apiExport) {
+        logger.verbose(`   - Twilio smsWebhookApi '${twilioConfig.smsWebhookApi}' not found in exports, skipping`);
+        return null;
+    }
+
+    // Build webhook URL: https://{domain}/{mapping.path}/{api.path}
+    const segments = [stageConfig.mapping.domain];
+    if (stageConfig.mapping.path) {
+        segments.push(stageConfig.mapping.path);
+    }
+    segments.push(apiExport.path);
+    const webhookUrl = 'https://' + segments.join('/');
+
+    logger.verbose(`\n * Updating Twilio phone number webhook:`);
+    logger.verbose(`   - phone number SID: ${twilioConfig.phoneNumberSid}`);
+    logger.verbose(`   - webhook URL: ${webhookUrl}`);
+
+    const result = await twilio.updatePhoneNumberWebhook(
+        accountSid, authToken, twilioConfig.phoneNumberSid, webhookUrl
+    );
+
+    logger.verbose(`   - updated ${result.phoneNumber} → ${result.smsUrl}`);
+
+    return {
+        phoneNumberSid: twilioConfig.phoneNumberSid,
+        phoneNumber: result.phoneNumber,
+        webhookUrl: result.smsUrl,
+        action: 'updated'
+    };
+}
+
 module.exports = {
     getLambdaExports,
     getExportsByType,
@@ -572,4 +621,5 @@ module.exports = {
     processFunctionEnvironmentVars,
     processApiGateway,
     processSNS,
+    processTwilio,
     setStageConfig}
