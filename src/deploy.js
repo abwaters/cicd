@@ -27,14 +27,21 @@ async function main() {
     let processEnv = false;
     let processApi = true;
     let processSns = true ;
+    let processTwilioFlag = true;
     if( o.env ) {
         processEnv = true;
         processApi = false;
         processSns = false;
+        processTwilioFlag = false;
     }else if( o.api || o.sns ) {
         processApi = processSns = false;
         processApi = o.api;
         processSns = o.sns;
+        processTwilioFlag = false;
+    }
+
+    if( o.noTwilio ) {
+        processTwilioFlag = false;
     }
 
     if( processApi || processSns ) {
@@ -60,6 +67,7 @@ async function main() {
     let envResults = null;
     let apiResults = null;
     let snsResults = null;
+    let twilioResult = null;
 
     if( processEnv ) {
         envResults = await cicd.processFunctionEnvironmentVars();
@@ -71,6 +79,10 @@ async function main() {
 
     if( processSns ) {
         snsResults = await cicd.processSNS(stage,appAlias,commit);
+    }
+
+    if( processTwilioFlag ) {
+        twilioResult = await cicd.processTwilio(stage);
     }
 
     // ── Print summary ─────────────────────────────────────────────────
@@ -123,6 +135,12 @@ async function main() {
         }
     }
 
+    // Twilio
+    if (twilioResult) {
+        console.log(`\nTwilio:`);
+        console.log(`  ${twilioResult.phoneNumberSid.padEnd(40)} ${twilioResult.webhookUrl}`);
+    }
+
     // Summary line
     const parts = [];
     if (envResults) {
@@ -140,6 +158,9 @@ async function main() {
         if (subscribed > 0 || skipped > 0) {
             parts.push(`${subscribed} topics subscribed${skipped > 0 ? `, ${skipped} skipped` : ''}`);
         }
+    }
+    if (twilioResult) {
+        parts.push(`Twilio webhook ${twilioResult.action}`);
     }
     console.log(`\nSummary: ${parts.join(', ')}`);
 
