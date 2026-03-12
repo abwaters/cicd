@@ -572,9 +572,9 @@ async function processTwilio(stage) {
 
     const twilioConfig = stageConfig.twilio;
 
-    // Read Twilio credentials from envCache
-    const accountSid = envCache.get('TWILIO_ACCOUNT_SID');
-    const authToken = envCache.get('TWILIO_AUTH_TOKEN');
+    // Read Twilio credentials from process environment (independent of Lambda env vars)
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (!accountSid || !authToken) {
         logger.verbose(`   - Twilio credentials not found in environment, skipping`);
         return null;
