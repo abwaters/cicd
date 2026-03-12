@@ -140,11 +140,11 @@ async function main() {
 
     // Twilio Phone Numbers
     const twilioResults = [];
-    for (const stage of stages) {
-        if (stage.twilio) {
-            const accountSid = await cicd.getVar('TWILIO_ACCOUNT_SID').catch(() => null);
-            const authToken = await cicd.getVar('TWILIO_AUTH_TOKEN').catch(() => null);
-            if (accountSid && authToken) {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (accountSid && authToken) {
+        for (const stage of stages) {
+            if (stage.twilio) {
                 try {
                     const phone = await twilio.getPhoneNumber(accountSid, authToken, stage.twilio.phoneNumberSid);
                     twilioResults.push({ stage: stage.stage, phoneNumber: phone.phoneNumber, smsUrl: phone.smsUrl });
