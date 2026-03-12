@@ -3,6 +3,7 @@ const cicd = require('./shared/cicd');
 const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
 const sns = require('./shared/sns');
+const twilio = require('./shared/twilio');
 const credentials = require('./shared/credentials');
 const logger = require('./shared/logger');
 const { printHeader } = require('./shared/header');
@@ -134,6 +135,29 @@ async function main() {
         console.log(`\nSNS Topics:`);
         for (const r of topicResults) {
             console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
+        }
+    }
+
+    // Twilio Phone Numbers
+    const twilioResults = [];
+    for (const stage of stages) {
+        if (stage.twilio) {
+            const accountSid = await cicd.getVar('TWILIO_ACCOUNT_SID').catch(() => null);
+            const authToken = await cicd.getVar('TWILIO_AUTH_TOKEN').catch(() => null);
+            if (accountSid && authToken) {
+                try {
+                    const phone = await twilio.getPhoneNumber(accountSid, authToken, stage.twilio.phoneNumberSid);
+                    twilioResults.push({ stage: stage.stage, phoneNumber: phone.phoneNumber, smsUrl: phone.smsUrl });
+                } catch (e) {
+                    twilioResults.push({ stage: stage.stage, phoneNumber: stage.twilio.phoneNumberSid, smsUrl: 'error fetching' });
+                }
+            }
+        }
+    }
+    if (twilioResults.length > 0) {
+        console.log(`\nTwilio Phone Numbers:`);
+        for (const r of twilioResults) {
+            console.log(`  ${r.stage.padEnd(15)} ${r.phoneNumber.padEnd(20)} ${r.smsUrl}`);
         }
     }
 
