@@ -193,6 +193,24 @@
               }
             },
             "additionalProperties": false
+          },
+          "twilio": {
+            "type": "object",
+            "description": "Twilio phone number configuration for this stage",
+            "required": ["phoneNumberSid", "smsWebhookApi"],
+            "properties": {
+              "phoneNumberSid": {
+                "type": "string",
+                "description": "Twilio phone number SID (e.g., PNxxxxxxxx)",
+                "pattern": "^PN[a-f0-9]{32}$"
+              },
+              "smsWebhookApi": {
+                "type": "string",
+                "description": "Name of the API export to use for building the SMS webhook URL",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
