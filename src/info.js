@@ -145,7 +145,14 @@ async function main() {
     if (accountSid && authToken) {
         for (const stage of stages) {
             if (stage.twilio) {
-                const sid = stage.twilio.messagingSid;
+                let sid = stage.twilio.messagingSid;
+                if (sid.startsWith('!')) {
+                    sid = await cicd.resolveVariable(sid);
+                    if (!sid) {
+                        logger.verbose(`   - Could not resolve Twilio messagingSid for stage ${stage.stage}, skipping`);
+                        continue;
+                    }
+                }
                 if (twilio.isMessagingServiceSid(sid)) {
                     try {
                         const svc = await twilio.getMessagingService(accountSid, authToken, sid);
