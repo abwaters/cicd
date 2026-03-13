@@ -145,19 +145,20 @@ async function main() {
     if (accountSid && authToken) {
         for (const stage of stages) {
             if (stage.twilio) {
-                if (twilio.isMessagingServiceSid(stage.twilio.messagingServiceSid)) {
+                const sid = stage.twilio.messagingSid;
+                if (twilio.isMessagingServiceSid(sid)) {
                     try {
-                        const svc = await twilio.getMessagingService(accountSid, authToken, stage.twilio.messagingServiceSid);
+                        const svc = await twilio.getMessagingService(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
                     } catch (e) {
-                        twilioResults.push({ stage: stage.stage, label: stage.twilio.messagingServiceSid, webhookUrl: 'error fetching', type: 'messaging-service' });
+                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: 'error fetching', type: 'messaging-service' });
                     }
                 } else {
                     try {
-                        const phone = await twilio.getPhoneNumber(accountSid, authToken, stage.twilio.phoneNumberSid);
+                        const phone = await twilio.getPhoneNumber(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
                     } catch (e) {
-                        twilioResults.push({ stage: stage.stage, label: stage.twilio.phoneNumberSid, webhookUrl: 'error fetching', type: 'phone-number' });
+                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: 'error fetching', type: 'phone-number' });
                     }
                 }
             }
