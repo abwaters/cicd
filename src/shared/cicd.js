@@ -78,7 +78,7 @@ async function resolveEnvironmentVariable(key) {
         }
     }else if( key.startsWith('!ParameterStore ') ) {
         const psName = key.substring(16).trim();
-        val = await ps.getParameterValue(psName);
+        val = await ps.getParameterValue(psName, true);
         if (val) {
             val = val.replace(/\\"/g, '"');
             val = val.replace(/\\\\n/g, "\\n");
