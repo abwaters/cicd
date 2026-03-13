@@ -14,6 +14,7 @@ const rawExports = new Map();
 const exportMap = new Map();
 const functionMap = new Map();
 let envCache = null;
+const psCache = new Map();
 let stageConfig = null;
 
 async function init() {
@@ -58,7 +59,7 @@ async function getVars(vars) {
     return env;
 }
 
-async function resolveEnvironmentVariable(key) {
+async function resolveVariable(key) {
     let val = '';
     if( key.startsWith('!ImportValue ') ) {
         const importName = key.substring(13).trim();
@@ -78,12 +79,17 @@ async function resolveEnvironmentVariable(key) {
         }
     }else if( key.startsWith('!ParameterStore ') ) {
         const psName = key.substring(16).trim();
-        val = await ps.getParameterValue(psName, true);
-        if (val) {
-            val = val.replace(/\\"/g, '"');
-            val = val.replace(/\\\\n/g, "\\n");
+        if( psCache.has(psName) ) {
+            val = psCache.get(psName);
         } else {
-            val = '';
+            val = await ps.getParameterValue(psName, true);
+            if (val) {
+                val = val.replace(/\\"/g, '"');
+                val = val.replace(/\\\\n/g, "\\n");
+            } else {
+                val = '';
+            }
+            psCache.set(psName, val);
         }
     }
     return val;
@@ -95,7 +101,7 @@ async function initEnvironmentVars(env) {
     }
     const envConfig = Object.keys(env) ;
     for(const key of envConfig) {
-        let val = await resolveEnvironmentVariable(env[key]);
+        let val = await resolveVariable(env[key]);
         envCache.set(key,val);
     }
 }
@@ -595,7 +601,14 @@ async function processTwilio(stage) {
     segments.push(apiExport.path);
     const webhookUrl = 'https://' + segments.join('/');
 
-    const sid = twilioConfig.messagingSid;
+    let sid = twilioConfig.messagingSid;
+    if (sid.startsWith('!')) {
+        sid = await resolveVariable(sid);
+        if (!sid) {
+            logger.verbose(`   - Could not resolve Twilio messagingSid, skipping`);
+            return null;
+        }
+    }
     const isMessagingService = twilio.isMessagingServiceSid(sid);
 
     if (isMessagingService) {
@@ -644,4 +657,5 @@ module.exports = {
     processApiGateway,
     processSNS,
     processTwilio,
+    resolveVariable,
     setStageConfig}
