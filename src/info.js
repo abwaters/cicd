@@ -138,26 +138,36 @@ async function main() {
         }
     }
 
-    // Twilio Phone Numbers
+    // Twilio Phone Numbers & Messaging Services
     const twilioResults = [];
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (accountSid && authToken) {
         for (const stage of stages) {
             if (stage.twilio) {
-                try {
-                    const phone = await twilio.getPhoneNumber(accountSid, authToken, stage.twilio.phoneNumberSid);
-                    twilioResults.push({ stage: stage.stage, phoneNumber: phone.phoneNumber, smsUrl: phone.smsUrl });
-                } catch (e) {
-                    twilioResults.push({ stage: stage.stage, phoneNumber: stage.twilio.phoneNumberSid, smsUrl: 'error fetching' });
+                if (twilio.isMessagingServiceSid(stage.twilio.messagingServiceSid)) {
+                    try {
+                        const svc = await twilio.getMessagingService(accountSid, authToken, stage.twilio.messagingServiceSid);
+                        twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
+                    } catch (e) {
+                        twilioResults.push({ stage: stage.stage, label: stage.twilio.messagingServiceSid, webhookUrl: 'error fetching', type: 'messaging-service' });
+                    }
+                } else {
+                    try {
+                        const phone = await twilio.getPhoneNumber(accountSid, authToken, stage.twilio.phoneNumberSid);
+                        twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
+                    } catch (e) {
+                        twilioResults.push({ stage: stage.stage, label: stage.twilio.phoneNumberSid, webhookUrl: 'error fetching', type: 'phone-number' });
+                    }
                 }
             }
         }
     }
     if (twilioResults.length > 0) {
-        console.log(`\nTwilio Phone Numbers:`);
+        console.log(`\nTwilio:`);
         for (const r of twilioResults) {
-            console.log(`  ${r.stage.padEnd(15)} ${r.phoneNumber.padEnd(20)} ${r.smsUrl}`);
+            const typeTag = r.type === 'messaging-service' ? '[svc] ' : '[num] ';
+            console.log(`  ${r.stage.padEnd(15)} ${typeTag}${r.label.padEnd(20)} ${r.webhookUrl}`);
         }
     }
 
