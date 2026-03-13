@@ -147,7 +147,7 @@ async function main() {
             if (stage.twilio) {
                 let sid = stage.twilio.messagingSid;
                 if (sid.startsWith('!')) {
-                    sid = await cicd.resolveEnvironmentVariable(sid);
+                    sid = await cicd.resolveVariable(sid);
                     if (!sid) {
                         logger.verbose(`   - Could not resolve Twilio messagingSid for stage ${stage.stage}, skipping`);
                         continue;
