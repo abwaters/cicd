@@ -138,7 +138,7 @@ async function main() {
     // Twilio
     if (twilioResult) {
         console.log(`\nTwilio:`);
-        const twilioLabel = twilioResult.messagingServiceSid || twilioResult.phoneNumberSid;
+        const twilioLabel = twilioResult.messagingSid;
         console.log(`  ${twilioLabel.padEnd(40)} ${twilioResult.webhookUrl}`);
     }
 
