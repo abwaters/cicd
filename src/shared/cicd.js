@@ -595,7 +595,14 @@ async function processTwilio(stage) {
     segments.push(apiExport.path);
     const webhookUrl = 'https://' + segments.join('/');
 
-    const sid = twilioConfig.messagingSid;
+    let sid = twilioConfig.messagingSid;
+    if (sid.startsWith('!')) {
+        sid = await resolveEnvironmentVariable(sid);
+        if (!sid) {
+            logger.verbose(`   - Could not resolve Twilio messagingSid, skipping`);
+            return null;
+        }
+    }
     const isMessagingService = twilio.isMessagingServiceSid(sid);
 
     if (isMessagingService) {
@@ -644,4 +651,5 @@ module.exports = {
     processApiGateway,
     processSNS,
     processTwilio,
+    resolveEnvironmentVariable,
     setStageConfig}

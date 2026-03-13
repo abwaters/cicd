@@ -145,20 +145,29 @@ async function main() {
     if (accountSid && authToken) {
         for (const stage of stages) {
             if (stage.twilio) {
-                const sid = stage.twilio.messagingSid;
+                let sid = stage.twilio.messagingSid;
+                if (sid.startsWith('!')) {
+                    sid = await cicd.resolveEnvironmentVariable(sid);
+                    if (!sid) {
+                        logger.verbose(`   - Could not resolve Twilio messagingSid for stage ${stage.stage}, skipping`);
+                        continue;
+                    }
+                }
                 if (twilio.isMessagingServiceSid(sid)) {
                     try {
                         const svc = await twilio.getMessagingService(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
                     } catch (e) {
-                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: 'error fetching', type: 'messaging-service' });
+                        logger.verbose(`   - Error fetching messaging service ${sid}: ${e.message}`);
+                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'messaging-service' });
                     }
                 } else {
                     try {
                         const phone = await twilio.getPhoneNumber(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
                     } catch (e) {
-                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: 'error fetching', type: 'phone-number' });
+                        logger.verbose(`   - Error fetching phone number ${sid}: ${e.message}`);
+                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'phone-number' });
                     }
                 }
             }
