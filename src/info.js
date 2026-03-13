@@ -151,14 +151,16 @@ async function main() {
                         const svc = await twilio.getMessagingService(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
                     } catch (e) {
-                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: 'error fetching', type: 'messaging-service' });
+                        logger.verbose(`   - Error fetching messaging service ${sid}: ${e.message}`);
+                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'messaging-service' });
                     }
                 } else {
                     try {
                         const phone = await twilio.getPhoneNumber(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
                     } catch (e) {
-                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: 'error fetching', type: 'phone-number' });
+                        logger.verbose(`   - Error fetching phone number ${sid}: ${e.message}`);
+                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'phone-number' });
                     }
                 }
             }
