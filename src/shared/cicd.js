@@ -595,22 +595,45 @@ async function processTwilio(stage) {
     segments.push(apiExport.path);
     const webhookUrl = 'https://' + segments.join('/');
 
-    logger.verbose(`\n * Updating Twilio phone number webhook:`);
-    logger.verbose(`   - phone number SID: ${twilioConfig.phoneNumberSid}`);
-    logger.verbose(`   - webhook URL: ${webhookUrl}`);
+    const isMessagingService = twilio.isMessagingServiceSid(twilioConfig.messagingServiceSid);
 
-    const result = await twilio.updatePhoneNumberWebhook(
-        accountSid, authToken, twilioConfig.phoneNumberSid, webhookUrl
-    );
+    if (isMessagingService) {
+        const sid = twilioConfig.messagingServiceSid;
+        logger.verbose(`\n * Updating Twilio messaging service webhook:`);
+        logger.verbose(`   - messaging service SID: ${sid}`);
+        logger.verbose(`   - webhook URL: ${webhookUrl}`);
 
-    logger.verbose(`   - updated ${result.phoneNumber} → ${result.smsUrl}`);
+        const result = await twilio.updateMessagingServiceWebhook(
+            accountSid, authToken, sid, webhookUrl
+        );
 
-    return {
-        phoneNumberSid: twilioConfig.phoneNumberSid,
-        phoneNumber: result.phoneNumber,
-        webhookUrl: result.smsUrl,
-        action: 'updated'
-    };
+        logger.verbose(`   - updated ${result.friendlyName} → ${result.inboundRequestUrl}`);
+
+        return {
+            messagingServiceSid: sid,
+            friendlyName: result.friendlyName,
+            webhookUrl: result.inboundRequestUrl,
+            action: 'updated'
+        };
+    } else {
+        const sid = twilioConfig.phoneNumberSid;
+        logger.verbose(`\n * Updating Twilio phone number webhook:`);
+        logger.verbose(`   - phone number SID: ${sid}`);
+        logger.verbose(`   - webhook URL: ${webhookUrl}`);
+
+        const result = await twilio.updatePhoneNumberWebhook(
+            accountSid, authToken, sid, webhookUrl
+        );
+
+        logger.verbose(`   - updated ${result.phoneNumber} → ${result.smsUrl}`);
+
+        return {
+            phoneNumberSid: sid,
+            phoneNumber: result.phoneNumber,
+            webhookUrl: result.smsUrl,
+            action: 'updated'
+        };
+    }
 }
 
 module.exports = {
