@@ -3,6 +3,7 @@ const {
     GetCallerIdentityCommand
 } = require("@aws-sdk/client-sts");
 const { getConfig } = require('./config');
+const { awsRetry } = require('./utils');
 
 let client = null;
 
@@ -18,7 +19,7 @@ async function getAccountNumber() {
     try {
         const command = new GetCallerIdentityCommand({});
         const stsClient = await getClient();
-        const response = await stsClient.send(command);
+        const response = await awsRetry(() => stsClient.send(command));
         console.log(response);
         return response.Account;
     } catch (error) {
