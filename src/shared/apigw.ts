@@ -1,6 +1,5 @@
-const {
+import {
     APIGatewayClient,
-    GetDomainNamesCommand,
     DeleteDeploymentCommand,
     GetDeploymentsCommand,
     UpdateStageCommand,
@@ -9,17 +8,25 @@ const {
     CreateStageCommand,
     CreateBasePathMappingCommand,
     GetBasePathMappingsCommand,
-    TagResourceCommand } = require("@aws-sdk/client-api-gateway");
-const {
+    TagResourceCommand,
+    Deployment,
+    Stage,
+    BasePathMapping,
+    PatchOperation
+} from "@aws-sdk/client-api-gateway";
+import {
     ApiGatewayV2Client,
-    CreateApiMappingCommand } = require("@aws-sdk/client-apigatewayv2");
+    CreateApiMappingCommand
+} from "@aws-sdk/client-apigatewayv2";
+import { ThrottleSettings, DeploymentInfo } from '../types';
+
 const config = require('./config');
 const { awsRetry } = require('./utils');
 
-let client = null;
-let clientv2 = null;
+let client: APIGatewayClient | null = null;
+let clientv2: ApiGatewayV2Client | null = null;
 
-async function getClient() {
+async function getClient(): Promise<APIGatewayClient> {
     if (!client) {
         const region = await config.getConfig('region');
         client = new APIGatewayClient({ region });
@@ -27,7 +34,7 @@ async function getClient() {
     return client;
 }
 
-async function getClientV2() {
+async function getClientV2(): Promise<ApiGatewayV2Client> {
     if (!clientv2) {
         const region = await config.getConfig('region');
         clientv2 = new ApiGatewayV2Client({ region });
@@ -35,26 +42,25 @@ async function getClientV2() {
     return clientv2;
 }
 
-async function createDeployment(apiId,commit) {
+async function createDeployment(apiId: string, commit: string): Promise<DeploymentInfo | null> {
     try {
-        // Create the command with the necessary parameters
         const command = new CreateDeploymentCommand({
             restApiId: apiId,
             description: commit
         });
         const apiClient = await getClient();
         const response = await awsRetry(() => apiClient.send(command));
-        return {id:response.id,description:response.description};
+        return {id: response.id!, description: response.description};
     } catch (error) {
         console.error("Error creating API Gateway deployment:", error);
     }
     return null;
 }
 
-async function createStage(apiId, stageName, deploymentId, commit, throttleSettings) {
+async function createStage(apiId: string, stageName: string, deploymentId: string, commit: string, throttleSettings: ThrottleSettings | null): Promise<void> {
     const app = await config.getConfig('app');
     try {
-        const commandParams = {
+        const commandParams: any = {
             restApiId: apiId,
             stageName: stageName,
             deploymentId: deploymentId,
@@ -83,13 +89,13 @@ async function createStage(apiId, stageName, deploymentId, commit, throttleSetti
     }
 }
 
-async function createCustomDomainMapping(domainName, restApiId, stage, basePath) {
+async function createCustomDomainMapping(domainName: string, restApiId: string, stage: string, basePath: string): Promise<void> {
     try {
         const command = new CreateBasePathMappingCommand({
             domainName: domainName,
             restApiId: restApiId,
             stage: stage,
-            basePath: basePath // Setting the basePath here
+            basePath: basePath
         });
         const apiClient = await getClient();
         await awsRetry(() => apiClient.send(command));
@@ -98,12 +104,7 @@ async function createCustomDomainMapping(domainName, restApiId, stage, basePath)
     }
 }
 
-/**
- * Lists all deployments for a REST API
- * @param {string} restApiId - The REST API ID
- * @returns {Promise<Array>} Array of deployment objects, or empty array on error
- */
-async function listDeployments(restApiId) {
+async function listDeployments(restApiId: string): Promise<Deployment[]> {
     try {
         const command = new GetDeploymentsCommand({
             restApiId: restApiId
@@ -118,12 +119,7 @@ async function listDeployments(restApiId) {
     }
 }
 
-/**
- * Lists all stages for a REST API
- * @param {string} restApiId - The REST API ID
- * @returns {Promise<Array>} Array of stage objects, or empty array on error
- */
-async function listStages(restApiId) {
+async function listStages(restApiId: string): Promise<Stage[]> {
     try {
         const command = new GetStagesCommand({
             restApiId: restApiId
@@ -137,11 +133,11 @@ async function listStages(restApiId) {
     }
 }
 
-async function updateStage(restApiId, stageName, deploymentId, commit, throttleSettings) {
+async function updateStage(restApiId: string, stageName: string, deploymentId: string, commit: string, throttleSettings: ThrottleSettings | null): Promise<void> {
     const app = await config.getConfig('app');
     const region = await config.getConfig('region');
     try {
-        const patchOperations = [
+        const patchOperations: PatchOperation[] = [
             {
                 op: "replace",
                 path: "/deploymentId",
@@ -206,12 +202,7 @@ async function updateStage(restApiId, stageName, deploymentId, commit, throttleS
     }
 }
 
-/**
- * Lists all base path mappings for a custom domain
- * @param {string} domainName - The custom domain name
- * @returns {Promise<Array>} Array of base path mapping objects, or empty array on error
- */
-async function listBasePathMappings(domainName) {
+async function listBasePathMappings(domainName: string): Promise<BasePathMapping[]> {
     try {
         const command = new GetBasePathMappingsCommand({
             domainName: domainName
@@ -226,7 +217,7 @@ async function listBasePathMappings(domainName) {
     }
 }
 
-async function createCustomDomainMappingV2(domainName, apiId, stage, basePath) {
+async function createCustomDomainMappingV2(domainName: string, apiId: string, stage: string, basePath: string): Promise<void> {
     try {
         const command = new CreateApiMappingCommand({
             DomainName: domainName,
@@ -241,7 +232,7 @@ async function createCustomDomainMappingV2(domainName, apiId, stage, basePath) {
     }
 }
 
-async function deleteDeployment(apiId, deploymentId) {
+async function deleteDeployment(apiId: string, deploymentId: string): Promise<void> {
     const command = new DeleteDeploymentCommand({
         restApiId: apiId,
         deploymentId: deploymentId
