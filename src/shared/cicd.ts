@@ -1,3 +1,20 @@
+import {
+    ExportConfig,
+    FunctionConfig,
+    StageConfig,
+    ThrottleSettings,
+    EnvResult,
+    APIFunctionResult,
+    APIDeploymentResult,
+    APIResult,
+    SNSFunctionResult,
+    SNSSubscriptionResult,
+    SNSResult,
+    TwilioDeployResult,
+    VersionInfo
+} from '../types';
+import { Deployment, Stage, BasePathMapping } from '@aws-sdk/client-api-gateway';
+
 const lambda = require("./lambda");
 const apigw = require("./apigw");
 const sns = require("./sns");
@@ -7,14 +24,14 @@ const ps = require('./ps');
 const {getConfig} = require('./config');
 const logger = require('./logger');
 
-const rawExports = new Map();
-const exportMap = new Map();
-const functionMap = new Map();
-let envCache = null;
-const psCache = new Map();
-let stageConfig = null;
+const rawExports = new Map<string, string>();
+const exportMap = new Map<string, ExportConfig>();
+const functionMap = new Map<string, FunctionConfig>();
+let envCache: Map<string, string> | null = null;
+const psCache = new Map<string, string>();
+let stageConfig: StageConfig | null = null;
 
-async function init() {
+async function init(): Promise<void> {
     if( !exportMap || exportMap.size === 0 ) {
         await initExports();
     }
@@ -24,11 +41,11 @@ async function init() {
     }
 }
 
-async function getVar(key) {
+async function getVar(key: string): Promise<string> {
     await init();
     let val = '';
-    if( envCache.has(key) ) {
-        val = envCache.get(key);
+    if( envCache!.has(key) ) {
+        val = envCache!.get(key)!;
     }
     if( !val ) {
         console.log(`VARIABLE ${key} is empty.`);
@@ -37,47 +54,45 @@ async function getVar(key) {
     return val ;
 }
 
-function splitVars(varNames) {
+function splitVars(varNames: string): string[] {
     const names = varNames.split(',');
     return names.map(n=>n.trim());
 }
 
-async function getVars(vars) {
+async function getVars(vars: string | string[] | undefined): Promise<Record<string, string> | null> {
     if( typeof vars === 'string' ) {
         vars = splitVars(vars);
     }
     if( !Array.isArray(vars) ) {
         return null;
     }
-    const env = {};
+    const env: Record<string, string> = {};
     for(const v of vars) {
         env[v] = await getVar(v);
     }
     return env;
 }
 
-async function resolveVariable(key) {
+async function resolveVariable(key: string): Promise<string> {
     let val = '';
     if( key.startsWith('!ImportValue ') ) {
         const importName = key.substring(13).trim();
         if( rawExports.has(importName) ) {
-            val = rawExports.get(importName);
+            val = rawExports.get(importName)!;
         }else{
             val = '';
         }
     }else if( key.startsWith('!SetEnv ') ) {
         const envName = key.substring(8).trim();
-        val = process.env[envName];
+        val = process.env[envName] || '';
         if (val) {
             val = val.replace(/\\"/g, '"');
             val = val.replace(/\\\\n/g, "\\n");
-        } else {
-            val = '';
         }
     }else if( key.startsWith('!ParameterStore ') ) {
         const psName = key.substring(16).trim();
         if( psCache.has(psName) ) {
-            val = psCache.get(psName);
+            val = psCache.get(psName)!;
         } else {
             val = await ps.getParameterValue(psName, true);
             if (val) {
@@ -92,22 +107,22 @@ async function resolveVariable(key) {
     return val;
 }
 
-async function initEnvironmentVars(env) {
+async function initEnvironmentVars(env: Record<string, string> | undefined): Promise<void> {
     if (!env) {
         return;
     }
     const envConfig = Object.keys(env) ;
     for(const key of envConfig) {
         let val = await resolveVariable(env[key]);
-        envCache.set(key,val);
+        envCache!.set(key,val);
     }
 }
 
-async function setStageConfig(stage) {
+async function setStageConfig(stage: string): Promise<void> {
     stageConfig = await getStageConfig(stage);
 }
 
-async function initEnvironment() {
+async function initEnvironment(): Promise<void> {
     envCache = new Map();
 
     // process primary variables
@@ -121,9 +136,9 @@ async function initEnvironment() {
     }
 }
 
-async function initExports() {
+async function initExports(): Promise<void> {
     try {
-        const exportConfigs = await getConfig('exports');
+        const exportConfigs: ExportConfig[] = await getConfig('exports');
         for(const cfg of exportConfigs) {
             exportMap.set(cfg.name,cfg);
             if( cfg.functions ) {
@@ -137,10 +152,10 @@ async function initExports() {
         const response = await cf.listExports();
         for(const e of response) {
             if( exportMap.has(e.Name) ) {
-                const cfg = exportMap.get(e.Name);
+                const cfg = exportMap.get(e.Name)!;
                 cfg.value = e.Value;
             }else if( functionMap.has(e.Name) ) {
-                const cfg = functionMap.get(e.Name);
+                const cfg = functionMap.get(e.Name)!;
                 cfg.value = e.Value;
             }
             rawExports.set(e.Name,e.Value);
@@ -168,13 +183,13 @@ async function initExports() {
         // update values for any items that don't have values
         for(const cfg of exportConfigs) {
             if( !cfg.value ) {
-                const entry = exportMap.get(cfg.name);
+                const entry = exportMap.get(cfg.name)!;
                 cfg.value = entry.value;
             }
             if( cfg.functions ) {
                 for(const f of cfg.functions) {
                     if( !f.value ) {
-                        const entry = functionMap.get(f.name);
+                        const entry = functionMap.get(f.name)!;
                         f.value = entry.value;
                     }
                 }
@@ -188,15 +203,15 @@ async function initExports() {
     }
 }
 
-async function getExportByName(name) {
+async function getExportByName(name: string): Promise<ExportConfig | null> {
     await init();
     if( exportMap.has(name) ) {
-        return exportMap.get(name);
+        return exportMap.get(name)!;
     }
     return null;
 }
 
-async function getExportsByType(type,filter) {
+async function getExportsByType(type: string, filter?: string): Promise<ExportConfig[]> {
     await init();
     if( filter ) {
         const exports = [...exportMap.values()];
@@ -207,10 +222,10 @@ async function getExportsByType(type,filter) {
     }
 }
 
-async function getLambdaExports(type,filter) {
+async function getLambdaExports(type: string, filter?: string): Promise<FunctionConfig[]> {
     await init();
     const entries = await getExportsByType(type,filter);
-    const expFunctions = {};
+    const expFunctions: Record<string, FunctionConfig> = {};
     for(const entry of entries) {
         if( entry.functions ) {
             for(const func of entry.functions) {
@@ -221,17 +236,17 @@ async function getLambdaExports(type,filter) {
     return [...Object.values(expFunctions)];
 }
 
-async function findVersion(functionName,commit) {
+async function findVersion(functionName: string, commit: string): Promise<string> {
     const versions = await lambda.listVersions(functionName);
     for(const version of versions) {
         if( version.description.includes(commit) ) {
-            return version.Version;
+            return version.version;
         }
     }
     return '';
 }
 
-async function findAlias(functionName,commit) {
+async function findAlias(functionName: string, commit: string): Promise<string> {
     const aliases = await lambda.listAliases(functionName);
     for(const alias of aliases) {
         if( alias.alias.includes(commit) ) {
@@ -241,7 +256,7 @@ async function findAlias(functionName,commit) {
     return '';
 }
 
-async function findTag(functionName,commit) {
+async function findTag(functionName: string, commit: string): Promise<boolean> {
     const fc = await lambda.describeFunction(functionName);
     const tags = await lambda.listFunctionTags(fc.FunctionArn);
     if( tags.hasOwnProperty('Commit') ) {
@@ -252,7 +267,7 @@ async function findTag(functionName,commit) {
     return false;
 }
 
-async function findDeployment(apiId,commit) {
+async function findDeployment(apiId: string, commit: string): Promise<Deployment | null> {
     const deployments = await apigw.listDeployments(apiId);
     for(const deployment of deployments) {
         if( deployment.description && deployment.description.includes(commit) ) {
@@ -262,7 +277,7 @@ async function findDeployment(apiId,commit) {
     return null;
 }
 
-async function findStages(apiId,stage) {
+async function findStages(apiId: string, stage: string): Promise<Stage | null> {
     const stages = await apigw.listStages(apiId);
     for(const s of stages) {
         if( s.stageName === stage ) {
@@ -272,7 +287,7 @@ async function findStages(apiId,stage) {
     return null;
 }
 
-async function findMapping(domain,apiId,stage) {
+async function findMapping(domain: string, apiId: string, stage: string): Promise<BasePathMapping | null> {
     const mappings = await apigw.listBasePathMappings(domain);
     for(const m of mappings) {
         if( m.restApiId === apiId && m.stage === stage ) {
@@ -282,31 +297,31 @@ async function findMapping(domain,apiId,stage) {
     return null;
 }
 
-async function getStageConfig(stage) {
-    const stageConfigs = await getConfig("stages");
-    let stageConfig = null;
+async function getStageConfig(stage: string): Promise<StageConfig> {
+    const stageConfigs: StageConfig[] = await getConfig("stages");
+    let foundConfig: StageConfig | null = null;
     for(const sc of stageConfigs) {
         if( sc.stage === stage ) {
-            stageConfig = sc;
+            foundConfig = sc;
             break;
         }
     }
 
-    if( !stageConfig ) {
+    if( !foundConfig ) {
         console.log(`No configuration for ${stage}`);
         process.exit(-1);
     }
-    return stageConfig;
+    return foundConfig!;
 }
 
-async function processFunctionEnvironmentVars() {
+async function processFunctionEnvironmentVars(): Promise<EnvResult[]> {
     const apiFunctions =  await getLambdaExports('api');
     const snsFunctions =  await getLambdaExports('sns');
     const functions = [...apiFunctions,...snsFunctions];
-    const results = [];
+    const results: EnvResult[] = [];
     logger.verbose(`\n * Creating environment vars for functions:`);
     for(const f of functions) {
-        const functionName = f.value;
+        const functionName = f.value!;
         const funcEnv = await getVars(f.env);
         if( funcEnv ) {
             logger.verbose(`   - setting environment vars for function: '${functionName}'...`);
@@ -320,27 +335,26 @@ async function processFunctionEnvironmentVars() {
     return results;
 }
 
-async function processApiGatewayFunctions(stage,appAlias,commit,apiFilter)
-{
-    const stageConfig = await getStageConfig(stage);
+async function processApiGatewayFunctions(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIFunctionResult[]> {
+    const localStageConfig = await getStageConfig(stage);
     const functions =  await getLambdaExports('api',apiFilter);
-    const results = [];
+    const results: APIFunctionResult[] = [];
     logger.verbose(`\n * Creating versions and aliases for functions:`);
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
-        const functionName = f.value;
+        const functionName = f.value!;
         let version = await findVersion(functionName,commit);
         let alias = await findAlias(functionName,appAlias);
         if( alias ) {
             logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
             if( f.concurrency ) {
-                const r = await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
+                await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
                 logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
             }
             results.push({ name: functionName, action: 'exists', version });
         }else{
             if( !version ) {
-                let v = await lambda.publishNewVersion(functionName,appAlias);
+                let v: VersionInfo = await lambda.publishNewVersion(functionName,appAlias);
                 version = v.version;
                 logger.verbose(`   - using version ${version} for '${commit}'`);
                 let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
@@ -349,10 +363,10 @@ async function processApiGatewayFunctions(stage,appAlias,commit,apiFilter)
                     logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
                 }
             }
-            const r = await lambda.createAlias(functionName,appAlias,version);
+            await lambda.createAlias(functionName,appAlias,version);
             logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
             if( f.concurrency ) {
-                const r = await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
+                await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
                 logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
             }
             results.push({ name: functionName, action: 'created', version });
@@ -361,35 +375,35 @@ async function processApiGatewayFunctions(stage,appAlias,commit,apiFilter)
     return results;
 }
 
-async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
+async function processApiGatewayApis(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIDeploymentResult[]> {
     const account = await getConfig("account");
     const region = await getConfig("region");
-    const globalThrottle = await getConfig("throttle");
-    const stageConfig = await getStageConfig(stage);
+    const globalThrottle: ThrottleSettings | undefined = await getConfig("throttle");
+    const localStageConfig = await getStageConfig(stage);
     const apis = await getExportsByType('api',apiFilter);
-    const results = [];
+    const results: APIDeploymentResult[] = [];
     logger.verbose(`\n * Updating apis to deploy stage and ensure custom domain mappings:`);
     for(const api of apis) {
-        const apiId = api.value;
+        const apiId = api.value!;
         logger.verbose(` * Checking api ${api.name} [${api.value}]...`);
-        let deploymentAction = 'existing';
+        let deploymentAction: 'created' | 'existing' = 'existing';
         let deployment = await findDeployment(apiId,commit);
         if( !deployment ) {
             deployment = await apigw.createDeployment(apiId,commit);
-            logger.verbose(`   - created deployment '${deployment.id}'`);
+            logger.verbose(`   - created deployment '${deployment!.id}'`);
             deploymentAction = 'created';
         }else{
             logger.verbose(`   - using deployment '${deployment.id}'`);
         }
 
         // Resolve throttle settings: API-level > stage-level > global defaults
-        let throttleSettings = null;
-        let throttleSource = null;
+        let throttleSettings: ThrottleSettings | null = null;
+        let throttleSource: string | null = null;
         if (api.throttle) {
             throttleSettings = api.throttle;
             throttleSource = 'API-specific';
-        } else if (stageConfig.throttle) {
-            throttleSettings = stageConfig.throttle;
+        } else if (localStageConfig.throttle) {
+            throttleSettings = localStageConfig.throttle;
             throttleSource = 'stage-level';
         } else if (globalThrottle) {
             throttleSettings = globalThrottle;
@@ -408,40 +422,39 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
             throttleSettings = null;  // Ensure we don't pass partial config to AWS
         }
 
-        let stageAction = 'updated';
+        let stageAction: 'created' | 'updated' = 'updated';
         const currentStage = await findStages(apiId,stage);
         if( currentStage ) {
-            logger.verbose(`   - updating existing stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
-            await apigw.updateStage(apiId,stage,deployment.id,appAlias,throttleSettings);
+            logger.verbose(`   - updating existing stage '${stage}' to '${deployment!.id}' for '${appAlias}'`);
+            await apigw.updateStage(apiId,stage,deployment!.id,appAlias,throttleSettings);
         }else{
-            logger.verbose(`   - creating stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
-            await apigw.createStage(apiId,stage,deployment.id,appAlias,throttleSettings);
+            logger.verbose(`   - creating stage '${stage}' to '${deployment!.id}' for '${appAlias}'`);
+            await apigw.createStage(apiId,stage,deployment!.id,appAlias,throttleSettings);
             stageAction = 'created';
         }
 
         let path = api.path;
-        if( stageConfig.mapping.path ) {
-            path = stageConfig.mapping.path + "/" + path;
+        if( localStageConfig.mapping.path ) {
+            path = localStageConfig.mapping.path + "/" + path;
         }
-        let mappingAction = 'existing';
-        const m = await findMapping(stageConfig.mapping.domain,apiId,stage);
+        let mappingAction: 'created' | 'existing' = 'existing';
+        const m = await findMapping(localStageConfig.mapping.domain,apiId,stage);
         if( m ) {
-            logger.verbose(`   - using existing mapping for ${stageConfig.mapping.domain} with path '${path}'`);
+            logger.verbose(`   - using existing mapping for ${localStageConfig.mapping.domain} with path '${path}'`);
         }else{
-            logger.verbose(`   - create mapping for ${stageConfig.mapping.domain} with path '${path}'`);
+            logger.verbose(`   - create mapping for ${localStageConfig.mapping.domain} with path '${path}'`);
             try {
-                await apigw.createCustomDomainMappingV2(stageConfig.mapping.domain,apiId,stage,path);
+                await apigw.createCustomDomainMappingV2(localStageConfig.mapping.domain,apiId,stage,path);
                 mappingAction = 'created';
             }catch(e) {
-                logger.verbose(`   x mapping for ${stageConfig.mapping.domain} with path '${path}' already exists`);
+                logger.verbose(`   x mapping for ${localStageConfig.mapping.domain} with path '${path}' already exists`);
             }
         }
 
-        // arn:aws:lambda:us-west-2:XXXXXXXXXXXXX:function:GetHelloWithName
         // update permissions for functions
         for(const f of api.functions) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
-            const functionName = f.value;
+            const functionName = f.value!;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
             let sourceArn = `arn:aws:execute-api:${region}:${account}:${apiId}/*/${f.method}/*`;
             await lambda.addFunctionPermission(functionArn, sourceArn,'apigateway.amazonaws.com');
@@ -459,19 +472,19 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
     return results;
 }
 
-async function processApiGateway(stage,appAlias,commit,apiFilter) {
+async function processApiGateway(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIResult> {
     const functions = await processApiGatewayFunctions(stage,appAlias,commit,apiFilter);
     const apis = await processApiGatewayApis(stage,appAlias,commit,apiFilter);
     return { functions, apis };
 }
 
-async function processSNSFunctions(stage,appAlias,commit) {
+async function processSNSFunctions(stage: string, appAlias: string, commit: string): Promise<SNSFunctionResult[]> {
     const functions =  await getLambdaExports('sns');
-    const results = [];
+    const results: SNSFunctionResult[] = [];
     logger.verbose(`\nCreating versions and aliases for functions:`);
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
-        const functionName = f.value;
+        const functionName = f.value!;
         let version = await findVersion(functionName,commit);
         let alias = await findAlias(functionName,appAlias);
         if( alias ) {
@@ -479,7 +492,7 @@ async function processSNSFunctions(stage,appAlias,commit) {
             results.push({ name: functionName, action: 'exists', version });
         }else if( !alias ) {
             if( !version ) {
-                let v = await lambda.publishNewVersion(functionName,appAlias);
+                let v: VersionInfo = await lambda.publishNewVersion(functionName,appAlias);
                 version = v.version;
                 logger.verbose(`   - using version ${version} for '${commit}'`);
                 let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
@@ -488,7 +501,7 @@ async function processSNSFunctions(stage,appAlias,commit) {
                     logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
                 }
             }
-            const r = await lambda.createAlias(functionName,appAlias,version);
+            await lambda.createAlias(functionName,appAlias,version);
             logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
             results.push({ name: functionName, action: 'created', version });
         }
@@ -496,18 +509,18 @@ async function processSNSFunctions(stage,appAlias,commit) {
     return results;
 }
 
-async function processSNSSubscriptions(stage,appAlias,commit) {
+async function processSNSSubscriptions(stage: string, appAlias: string, commit: string): Promise<SNSSubscriptionResult[]> {
     const account = await getConfig("account");
     const region = await getConfig("region");
     const topics = await getExportsByType('sns');
-    const results = [];
+    const results: SNSSubscriptionResult[] = [];
     logger.verbose(`\n * Updating SNS subscriptions:`);
     for(const topic of topics) {
 
         // checking sns for stage
         if( topic.hasOwnProperty('stages') ) {
-            if( !topic.stages.includes(stageConfig.stage) ) {
-                logger.verbose(`   - skipping '${topic.name}' in '${stageConfig.stage}'`);
+            if( !topic.stages!.includes(stageConfig!.stage) ) {
+                logger.verbose(`   - skipping '${topic.name}' in '${stageConfig!.stage}'`);
                 results.push({ name: topic.name, action: 'skipped' });
                 continue;
             }
@@ -516,7 +529,7 @@ async function processSNSSubscriptions(stage,appAlias,commit) {
         let oldRemoved = 0;
         for(const f of topic.functions) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
-            const functionName = f.value;
+            const functionName = f.value!;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
             await lambda.addFunctionPermission(functionArn, topic.value,'sns.amazonaws.com');
 
@@ -539,7 +552,7 @@ async function processSNSSubscriptions(stage,appAlias,commit) {
     return results;
 }
 
-async function processSNS(stage,appAlias,commit) {
+async function processSNS(stage: string, appAlias: string, commit: string): Promise<SNSResult | null> {
     const topics = await getExportsByType('sns');
     if (topics.length === 0) {
         return null;
@@ -550,7 +563,7 @@ async function processSNS(stage,appAlias,commit) {
     return { functions, subscriptions };
 }
 
-async function processTwilio(stage) {
+async function processTwilio(stage: string): Promise<TwilioDeployResult | null> {
     if (!stageConfig || !stageConfig.twilio) {
         return null;
     }
@@ -573,11 +586,11 @@ async function processTwilio(stage) {
     }
 
     // Build webhook URL: https://{domain}/{mapping.path}/{api.path}
-    const segments = [stageConfig.mapping.domain];
+    const segments: string[] = [stageConfig.mapping.domain];
     if (stageConfig.mapping.path) {
         segments.push(stageConfig.mapping.path);
     }
-    segments.push(apiExport.path);
+    segments.push(apiExport.path!);
     const webhookUrl = 'https://' + segments.join('/');
 
     let sid = twilioConfig.messagingSid;
@@ -605,7 +618,7 @@ async function processTwilio(stage) {
             messagingSid: sid,
             friendlyName: result.friendlyName,
             webhookUrl: result.inboundRequestUrl,
-            action: 'updated'
+            action: 'updated' as const
         };
     } else {
         logger.verbose(`\n * Updating Twilio phone number webhook:`);
@@ -622,7 +635,7 @@ async function processTwilio(stage) {
             messagingSid: sid,
             phoneNumber: result.phoneNumber,
             webhookUrl: result.smsUrl,
-            action: 'updated'
+            action: 'updated' as const
         };
     }
 }
@@ -637,4 +650,4 @@ module.exports = {
     processSNS,
     processTwilio,
     resolveVariable,
-    setStageConfig}
+    setStageConfig};
