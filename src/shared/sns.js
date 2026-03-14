@@ -1,5 +1,6 @@
 const { SNSClient, SubscribeCommand, ListSubscriptionsByTopicCommand, UnsubscribeCommand } = require("@aws-sdk/client-sns");
 const { getConfig } = require('./config');
+const { awsRetry } = require('./utils');
 
 let client = null;
 
@@ -20,7 +21,7 @@ async function subscribeLambdaToTopic(topicArn,lambdaArn) {
         };
 
         const snsClient = await getClient();
-        const subscription = await snsClient.send(new SubscribeCommand(params));
+        await awsRetry(() => snsClient.send(new SubscribeCommand(params)));
     } catch (error) {
         console.error("Error subscribing Lambda to SNS:", error);
     }
@@ -38,13 +39,13 @@ async function listSubscriptionsByTopic(topicArn) {
         });
         let subscriptions = [];
         const snsClient = await getClient();
-        let response = await snsClient.send(command);
+        let response = await awsRetry(() => snsClient.send(command));
         for(const r of (response.Subscriptions || [])) {
             subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
         }
         while (response.NextToken) {
             command.input.NextToken = response.NextToken;
-            response = await snsClient.send(command);
+            response = await awsRetry(() => snsClient.send(command));
             for(const r of (response.Subscriptions || [])) {
                 subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
             }
@@ -62,7 +63,7 @@ async function deleteSubscription(subscriptionArn) {
             SubscriptionArn: subscriptionArn,
         });
         const snsClient = await getClient();
-        await snsClient.send(command);
+        await awsRetry(() => snsClient.send(command));
     } catch (error) {
         console.error("Error deleting subscription:", error);
     }

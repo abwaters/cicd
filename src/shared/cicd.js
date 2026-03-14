@@ -2,13 +2,10 @@ const lambda = require("./lambda");
 const apigw = require("./apigw");
 const sns = require("./sns");
 const twilio = require("./twilio");
-const utils = require('./utils');
 const cf = require('./cloudformation');
 const ps = require('./ps');
 const {getConfig} = require('./config');
 const logger = require('./logger');
-
-const EXTENDED_SLEEP_TIME = 2000;
 
 const rawExports = new Map();
 const exportMap = new Map();
@@ -225,7 +222,6 @@ async function getLambdaExports(type,filter) {
 }
 
 async function findVersion(functionName,commit) {
-    await utils.sleep();
     const versions = await lambda.listVersions(functionName);
     for(const version of versions) {
         if( version.description.includes(commit) ) {
@@ -236,7 +232,6 @@ async function findVersion(functionName,commit) {
 }
 
 async function findAlias(functionName,commit) {
-    await utils.sleep();
     const aliases = await lambda.listAliases(functionName);
     for(const alias of aliases) {
         if( alias.alias.includes(commit) ) {
@@ -258,7 +253,6 @@ async function findTag(functionName,commit) {
 }
 
 async function findDeployment(apiId,commit) {
-    await utils.sleep();
     const deployments = await apigw.listDeployments(apiId);
     for(const deployment of deployments) {
         if( deployment.description && deployment.description.includes(commit) ) {
@@ -269,7 +263,6 @@ async function findDeployment(apiId,commit) {
 }
 
 async function findStages(apiId,stage) {
-    await utils.sleep();
     const stages = await apigw.listStages(apiId);
     for(const s of stages) {
         if( s.stageName === stage ) {
@@ -280,7 +273,6 @@ async function findStages(apiId,stage) {
 }
 
 async function findMapping(domain,apiId,stage) {
-    await utils.sleep();
     const mappings = await apigw.listBasePathMappings(domain);
     for(const m of mappings) {
         if( m.restApiId === apiId && m.stage === stage ) {
@@ -325,7 +317,6 @@ async function processFunctionEnvironmentVars() {
             results.push({ name: functionName, updated: false, varCount: 0 });
         }
     }
-    await utils.sleep(EXTENDED_SLEEP_TIME);
     return results;
 }
 
@@ -349,18 +340,15 @@ async function processApiGatewayFunctions(stage,appAlias,commit,apiFilter)
             results.push({ name: functionName, action: 'exists', version });
         }else{
             if( !version ) {
-                await utils.sleep();
                 let v = await lambda.publishNewVersion(functionName,appAlias);
                 version = v.version;
                 logger.verbose(`   - using version ${version} for '${commit}'`);
                 let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                await utils.sleep();
                 let tags = await lambda.listFunctionTags(arn);
                 if( tags.Commit !== commit ) {
                     logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
                 }
             }
-            await utils.sleep();
             const r = await lambda.createAlias(functionName,appAlias,version);
             logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
             if( f.concurrency ) {
@@ -387,7 +375,6 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
         let deploymentAction = 'existing';
         let deployment = await findDeployment(apiId,commit);
         if( !deployment ) {
-            await utils.sleep();
             deployment = await apigw.createDeployment(apiId,commit);
             logger.verbose(`   - created deployment '${deployment.id}'`);
             deploymentAction = 'created';
@@ -425,11 +412,9 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
         const currentStage = await findStages(apiId,stage);
         if( currentStage ) {
             logger.verbose(`   - updating existing stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
-            await utils.sleep();
             await apigw.updateStage(apiId,stage,deployment.id,appAlias,throttleSettings);
         }else{
             logger.verbose(`   - creating stage '${stage}' to '${deployment.id}' for '${appAlias}'`);
-            await utils.sleep();
             await apigw.createStage(apiId,stage,deployment.id,appAlias,throttleSettings);
             stageAction = 'created';
         }
@@ -445,7 +430,6 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
         }else{
             logger.verbose(`   - create mapping for ${stageConfig.mapping.domain} with path '${path}'`);
             try {
-                await utils.sleep();
                 await apigw.createCustomDomainMappingV2(stageConfig.mapping.domain,apiId,stage,path);
                 mappingAction = 'created';
             }catch(e) {
@@ -460,7 +444,6 @@ async function processApiGatewayApis(stage,appAlias,commit,apiFilter){
             const functionName = f.value;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
             let sourceArn = `arn:aws:execute-api:${region}:${account}:${apiId}/*/${f.method}/*`;
-            await utils.sleep();
             await lambda.addFunctionPermission(functionArn, sourceArn,'apigateway.amazonaws.com');
         }
 
@@ -496,18 +479,15 @@ async function processSNSFunctions(stage,appAlias,commit) {
             results.push({ name: functionName, action: 'exists', version });
         }else if( !alias ) {
             if( !version ) {
-                await utils.sleep();
                 let v = await lambda.publishNewVersion(functionName,appAlias);
                 version = v.version;
                 logger.verbose(`   - using version ${version} for '${commit}'`);
                 let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                await utils.sleep();
                 let tags = await lambda.listFunctionTags(arn);
                 if( tags.Commit !== commit ) {
                     logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
                 }
             }
-            await utils.sleep();
             const r = await lambda.createAlias(functionName,appAlias,version);
             logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
             results.push({ name: functionName, action: 'created', version });
@@ -538,7 +518,6 @@ async function processSNSSubscriptions(stage,appAlias,commit) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
-            await utils.sleep(EXTENDED_SLEEP_TIME);
             await lambda.addFunctionPermission(functionArn, topic.value,'sns.amazonaws.com');
 
             // cleaning up existing subscriptions
