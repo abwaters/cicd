@@ -5,15 +5,17 @@
   "license": "ISC",
   "author": "",
   "type": "commonjs",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "bin": {
-    "cicd": "./src/index.js"
+    "cicd": "./dist/index.js"
   },
   "scripts": {
-    "deploy": "node src/index.js deploy",
-    "info": "node src/index.js info",
-    "clean": "node src/index.js clean",
-    "validate": "node src/index.js validate",
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "deploy": "node dist/index.js deploy",
+    "info": "node dist/index.js info",
+    "clean": "node dist/index.js clean",
+    "validate": "node dist/index.js validate",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -26,5 +28,10 @@
     "@aws-sdk/client-sts": "^3.1007.0",
     "ajv": "^8.18.0",
     "twilio": "^5.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }
