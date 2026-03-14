@@ -1,3 +1,16 @@
+import {
+    StageConfig,
+    ExportConfig,
+    FunctionConfig,
+    AliasInfo,
+    VersionListItem,
+    InfoStageEntry,
+    InfoTopicResult,
+    InfoTwilioResult,
+    InfoGitHubResult,
+    GitHubDeployment
+} from './types';
+
 const options = require('./shared/options');
 const cicd = require('./shared/cicd');
 const lambda = require('./shared/lambda');
@@ -9,7 +22,7 @@ const logger = require('./shared/logger');
 const github = require('./shared/github');
 const { printHeader } = require('./shared/header');
 
-async function main() {
+async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
 
@@ -28,23 +41,26 @@ async function main() {
     console.time("api cicd");
     if (!o.noHeader) printHeader();
     console.log(`Collecting information for stages...`);
-    const stages = await cicd.getConfig("stages");
-    const apis = await cicd.getExportsByType('api');
-    const topics = await cicd.getExportsByType('sns');
-    const topicFunctions = await cicd.getLambdaExports('sns');
-    const apiFunctions = await cicd.getLambdaExports('api');
+    const stages: StageConfig[] = await cicd.getConfig("stages");
+    const apis: ExportConfig[] = await cicd.getExportsByType('api');
+    const topics: ExportConfig[] = await cicd.getExportsByType('sns');
+    const topicFunctions: FunctionConfig[] = await cicd.getLambdaExports('sns');
+    const apiFunctions: FunctionConfig[] = await cicd.getLambdaExports('api');
     const functions = [...apiFunctions,...topicFunctions];
-    const stagesInfo = {}, funcAliases = new Map(), funcVersions = new Map() ;
+    const stagesInfo: Record<string, InfoStageEntry> = {};
+    const funcAliases = new Map<string, AliasInfo[]>();
+    const funcVersions = new Map<string, VersionListItem[]>();
     for(const stage of stages) {
         stagesInfo[stage.stage] = {
             name: stage.stage,
             commits: {},
             details: [],
+            functions: [],
         }
     }
 
     for(const api of apis) {
-        const apiId = api.value;
+        const apiId = api.value!;
         logger.verbose(`   - Checking api ${api.name} [${apiId}]`);
         const apistages = await apigw.listStages(apiId);
         for(const s of apistages) {
@@ -55,7 +71,7 @@ async function main() {
                 name,
                 stage: stagename,
                 commit: s.variables.Commit,
-                functions: []
+                functions: [] as any[]
             };
             if( !stagesInfo[stagename].commits.hasOwnProperty(commit) ) {
                 stagesInfo[stagename].commits[commit] = 1;
@@ -67,20 +83,20 @@ async function main() {
             if( o.details ) {
                 for(const f of functions) {
                     const finfo = {
-                        name: f.value,
+                        name: f.value!,
                         commit: 'not deployed'
                     };
-                    let aliases = funcAliases.get(f.value);
+                    let aliases = funcAliases.get(f.value!);
                     if( !aliases ) {
-                        aliases = await lambda.listAliases(f.value);
+                        aliases = await lambda.listAliases(f.value!);
                     }
-                    const matchingAlias = aliases.filter(a=>a.alias==commit);
+                    const matchingAlias = aliases!.filter((a: AliasInfo) => a.alias==commit);
                     if( matchingAlias.length > 0 ) {
-                        let versions = funcVersions.get(f.value);
+                        let versions = funcVersions.get(f.value!);
                         if( !versions ) {
-                            versions = await lambda.listVersions(f.value);
+                            versions = await lambda.listVersions(f.value!);
                         }
-                        const v = versions.filter(v=>v.version==matchingAlias[0].version)[0];
+                        const v = versions!.filter((v: VersionListItem) => v.version==matchingAlias[0].version)[0];
                         finfo.commit = v.description;
                     }
                     stagesInfo[stagename].functions.push(finfo);
@@ -90,7 +106,7 @@ async function main() {
     }
 
     // Collect SNS topic results
-    const topicResults = [];
+    const topicResults: InfoTopicResult[] = [];
     for(const topic of topics) {
         const subs = await sns.listSubscriptionsByTopic(topic.value);
         let commit = '';
@@ -122,8 +138,8 @@ async function main() {
             console.log(`  ${stageKey.padEnd(15)} not deployed`);
         }
         if( o.details ) {
-            const functions = stageEntry.functions;
-            for(const f of functions) {
+            const funcs = stageEntry.functions;
+            for(const f of funcs) {
                 const funcName = f.name;
                 const funcVersion = f.commit.includes('-')?f.commit.split('-')[1]:f.commit;
                 console.log(`    - ${funcName.padEnd(35)} ${funcVersion}`);
@@ -140,7 +156,7 @@ async function main() {
     }
 
     // Twilio Phone Numbers & Messaging Services
-    const twilioResults = [];
+    const twilioResults: InfoTwilioResult[] = [];
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (accountSid && authToken) {
@@ -158,7 +174,7 @@ async function main() {
                     try {
                         const svc = await twilio.getMessagingService(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
-                    } catch (e) {
+                    } catch (e: any) {
                         logger.verbose(`   - Error fetching messaging service ${sid}: ${e.message}`);
                         twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'messaging-service' });
                     }
@@ -166,7 +182,7 @@ async function main() {
                     try {
                         const phone = await twilio.getPhoneNumber(accountSid, authToken, sid);
                         twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
-                    } catch (e) {
+                    } catch (e: any) {
                         logger.verbose(`   - Error fetching phone number ${sid}: ${e.message}`);
                         twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'phone-number' });
                     }
@@ -185,9 +201,9 @@ async function main() {
     // GitHub Deployments
     const repo = await cicd.getConfig("repo");
     if (repo) {
-        const ghResults = [];
+        const ghResults: InfoGitHubResult[] = [];
         for (const stage of stages) {
-            const deployments = github.listDeployments(repo, stage.stage, 5);
+            const deployments: GitHubDeployment[] = github.listDeployments(repo, stage.stage, 5);
             if (deployments.length > 0) {
                 ghResults.push({ stage: stage.stage, deployments });
             }

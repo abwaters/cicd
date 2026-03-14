@@ -1,16 +1,12 @@
-#!/usr/bin/env node
+import * as fs from 'fs';
+import * as path from 'path';
+import Ajv, { ErrorObject } from 'ajv';
 
-const Ajv = require('ajv');
-const fs = require('fs');
-const path = require('path');
 const options = require('./shared/options');
 const logger = require('./shared/logger');
 const { printHeader } = require('./shared/header');
 
-/**
- * Validates cicd.json against cicd.schema.json
- */
-async function main() {
+async function main(): Promise<void> {
   try {
     // Parse options
     const args = process.argv.slice(2);
@@ -43,13 +39,13 @@ async function main() {
 
     if (valid) {
       console.log('✓ cicd.json is valid');
-      return true;
+      return;
     } else {
       console.error('✗ cicd.json validation failed:\n');
 
-      validate.errors.forEach((error) => {
-        const path = error.instancePath || 'root';
-        console.error(`  ${path}: ${error.message}`);
+      (validate.errors as ErrorObject[]).forEach((error) => {
+        const errorPath = error.instancePath || 'root';
+        console.error(`  ${errorPath}: ${error.message}`);
 
         if (error.params) {
           Object.entries(error.params).forEach(([key, value]) => {
@@ -60,7 +56,7 @@ async function main() {
 
       process.exit(1);
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error validating configuration:', error.message);
     process.exit(1);
   }

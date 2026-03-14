@@ -1,3 +1,5 @@
+import { ExportConfig, FunctionConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult } from './types';
+
 const sns = require('./shared/sns');
 const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
@@ -7,7 +9,7 @@ const options = require('./shared/options');
 const logger = require('./shared/logger');
 const { printHeader } = require('./shared/header');
 
-async function main() {
+async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
 
@@ -29,27 +31,27 @@ async function main() {
     console.log(`Preparing clean api gateway deployments and lambda aliases/versions...`);
 
     // get list of exports from cloudformation
-    const apis = await cicd.getExportsByType('api');
-    const topics = await cicd.getExportsByType('sns');
-    const apiFunctions = await cicd.getLambdaExports('api');
-    const snsFunctions = await cicd.getLambdaExports('sns');
+    const apis: ExportConfig[] = await cicd.getExportsByType('api');
+    const topics: ExportConfig[] = await cicd.getExportsByType('sns');
+    const apiFunctions: FunctionConfig[] = await cicd.getLambdaExports('api');
+    const snsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sns');
     const functions = [...apiFunctions,...snsFunctions];
-    let activeCommits = new Map(),
-        deletedDeployments=0,
+    let activeCommits = new Map<string, boolean>();
+    let deletedDeployments=0,
         deletedAliases=0,
         deletedVersions=0;
 
     // Map commit -> array of stage names (for the summary)
-    const commitStages = new Map();
+    const commitStages = new Map<string, string[]>();
 
     // Per-API results for summary
-    const apiResults = [];
+    const apiResults: CleanApiResult[] = [];
 
     // ── Phase 1: Scan API stages & clean deployments ──────────────────
     for(const api of apis) {
-        const apiId = api.value;
+        const apiId = api.value!;
         const stages = await apigw.listStages(apiId);
-        const activeDeployments = new Map();
+        const activeDeployments = new Map<string, string[]>();
         for(const s of stages) {
             const commit = s.variables.Commit;
             activeCommits.set(commit, true);
@@ -58,22 +60,22 @@ async function main() {
             if (!commitStages.has(commit)) {
                 commitStages.set(commit, []);
             }
-            if (!commitStages.get(commit).includes(s.stageName)) {
-                commitStages.get(commit).push(s.stageName);
+            if (!commitStages.get(commit)!.includes(s.stageName)) {
+                commitStages.get(commit)!.push(s.stageName);
             }
 
             // Accumulate stage names per deployment (fixes bug where second stage replaced first)
             if (!activeDeployments.has(s.deploymentId)) {
                 activeDeployments.set(s.deploymentId, [s.stageName]);
             } else {
-                activeDeployments.get(s.deploymentId).push(s.stageName);
+                activeDeployments.get(s.deploymentId)!.push(s.stageName);
             }
         }
 
         const deployments = await apigw.listDeployments(apiId);
         let removed = 0;
         let activeCount = 0;
-        const activeStageLabels = [];
+        const activeStageLabels: string[] = [];
         for(const d of deployments) {
             if (!activeDeployments.has(d.id)) {
                 logger.verbose(`   - Deployment '${d.id}' deleted from ${api.name}`);
@@ -81,7 +83,7 @@ async function main() {
                 deletedDeployments++;
                 removed++;
             } else {
-                const stageNames = activeDeployments.get(d.id);
+                const stageNames = activeDeployments.get(d.id)!;
                 logger.verbose(`   - Deployment '${d.id}' active (${stageNames.join(', ')})`);
                 activeCount++;
                 activeStageLabels.push(stageNames.sort().join('/'));
@@ -91,10 +93,10 @@ async function main() {
     }
 
     // ── Phase 2: Scan SNS topics ──────────────────────────────────────
-    const topicResults = [];
+    const topicResults: CleanTopicResult[] = [];
     for(const topic of topics) {
         const subscriptions = await sns.listSubscriptionsByTopic(topic.value);
-        let topicCommit = null;
+        let topicCommit: string | null = null;
         for(const subscription of subscriptions) {
             const f = await lambda.describeFunction(subscription.endpoint);
             const parts = subscription.endpoint.split(':');
@@ -113,10 +115,10 @@ async function main() {
     }
 
     // ── Phase 3: Clean Lambda aliases & versions ──────────────────────
-    const functionResults = [];
+    const functionResults: CleanFunctionResult[] = [];
     for(const f of functions) {
-        const functionName = f.value;
-        const activeVersions = new Map();
+        const functionName = f.value!;
+        const activeVersions = new Map<string, boolean>();
         let aliasesRemoved = 0, versionsRemoved = 0, activeCount = 0;
 
         const aliases = await lambda.listAliases(functionName);
