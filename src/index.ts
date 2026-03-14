@@ -34,6 +34,9 @@ async function main(): Promise<void> {
             case 'validate':
                 require('./validate');
                 break;
+            case 'rollback':
+                require('./rollback');
+                break;
             default:
                 console.error(`Error: Unknown command '${command}'\n`);
                 showUsage();
@@ -58,6 +61,9 @@ Commands:
 
   info [options]              Show current deployments for all stages
                               Options: --details, --verbose
+
+  rollback <stage> [commit]   Rollback a stage to a previous deployment
+                              Options: --env, --api, --sns, --api-filter=<name>, --verbose
 
   validate                    Validate cicd.json against schema
                               Options: --verbose
