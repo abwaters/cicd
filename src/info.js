@@ -6,6 +6,7 @@ const sns = require('./shared/sns');
 const twilio = require('./shared/twilio');
 const credentials = require('./shared/credentials');
 const logger = require('./shared/logger');
+const github = require('./shared/github');
 const { printHeader } = require('./shared/header');
 
 async function main() {
@@ -178,6 +179,28 @@ async function main() {
         for (const r of twilioResults) {
             const typeTag = r.type === 'messaging-service' ? '[svc] ' : '[num] ';
             console.log(`  ${r.stage.padEnd(15)} ${typeTag}${r.label.padEnd(20)} ${r.webhookUrl}`);
+        }
+    }
+
+    // GitHub Deployments
+    const repo = await cicd.getConfig("repo");
+    if (repo) {
+        const ghResults = [];
+        for (const stage of stages) {
+            const deployments = github.listDeployments(repo, stage.stage, 5);
+            if (deployments.length > 0) {
+                ghResults.push({ stage: stage.stage, deployments });
+            }
+        }
+        if (ghResults.length > 0) {
+            console.log(`\nGitHub Deployments:`);
+            for (const r of ghResults) {
+                console.log(`  ${r.stage}:`);
+                for (const d of r.deployments) {
+                    const ts = new Date(d.createdAt).toLocaleString();
+                    console.log(`    ${d.ref.padEnd(10)} ${d.status.padEnd(12)} ${ts}`);
+                }
+            }
         }
     }
 

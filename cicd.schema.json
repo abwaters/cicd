@@ -20,6 +20,11 @@
       "description": "AWS region for deployments",
       "pattern": "^[a-z]{2}-[a-z]+-[0-9]{1}$"
     },
+    "repo": {
+      "type": "string",
+      "description": "GitHub repository in owner/repo format for deployment tracking via gh CLI",
+      "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+    },
     "environment": {
       "type": "object",
       "description": "Global environment variables for all Lambda functions. Supports !ImportValue, !ParameterStore, and !SetEnv prefixes",
