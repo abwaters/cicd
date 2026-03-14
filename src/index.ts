@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
-const path = require('path');
-
-async function main() {
+async function main(): Promise<void> {
     const args = process.argv.slice(2);
 
     if (args.length === 0) {
@@ -41,13 +39,13 @@ async function main() {
                 showUsage();
                 process.exit(1);
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error(`Error executing command '${command}':`, error.message);
         process.exit(1);
     }
 }
 
-function showUsage() {
+function showUsage(): void {
     const cmd = require.main === module ? 'cicd' : 'node src/index.js';
     console.log(`Usage: ${cmd} <command> [options]
 

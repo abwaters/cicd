@@ -1,3 +1,5 @@
+import { EnvResult, APIResult, SNSResult, TwilioDeployResult } from './types';
+
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
 const credentials = require('./shared/credentials');
@@ -5,9 +7,7 @@ const logger = require('./shared/logger');
 const github = require('./shared/github');
 const { printHeader } = require('./shared/header');
 
-const SLEEP_TIME = 2000;
-
-async function main() {
+async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
 
@@ -26,8 +26,8 @@ async function main() {
     }
 
     let processEnv = false;
-    let processApi = true;
-    let processSns = true ;
+    let processApi: boolean = true;
+    let processSns: boolean = true ;
     let processTwilioFlag = true;
     if( o.env ) {
         processEnv = true;
@@ -36,8 +36,8 @@ async function main() {
         processTwilioFlag = false;
     }else if( o.api || o.sns ) {
         processApi = processSns = false;
-        processApi = o.api;
-        processSns = o.sns;
+        processApi = !!o.api;
+        processSns = !!o.sns;
         processTwilioFlag = false;
     }
 
@@ -51,7 +51,7 @@ async function main() {
 
     let apiFilter = '';
     if( o.apiFilter ) {
-        apiFilter = o.apiFilter ;
+        apiFilter = o.apiFilter as string;
     }
 
     // TODO: formalize the cicd initialization...
@@ -67,7 +67,7 @@ async function main() {
 
     // Create GitHub deployment if repo is configured
     const repo = await cicd.getConfig("repo");
-    let ghDeployment = null;
+    let ghDeployment: any = null;
     if (repo) {
         ghDeployment = github.createDeployment(repo, commit, stage, `Deploy ${appAlias} to ${stage}`);
         if (ghDeployment) {
@@ -75,10 +75,10 @@ async function main() {
         }
     }
 
-    let envResults = null;
-    let apiResults = null;
-    let snsResults = null;
-    let twilioResult = null;
+    let envResults: EnvResult[] | null = null;
+    let apiResults: APIResult | null = null;
+    let snsResults: SNSResult | null = null;
+    let twilioResult: TwilioDeployResult | null = null;
 
     try {
         if( processEnv ) {
@@ -96,7 +96,7 @@ async function main() {
         if( processTwilioFlag ) {
             twilioResult = await cicd.processTwilio(stage);
         }
-    } catch (err) {
+    } catch (err: any) {
         // Update GitHub deployment status to failure
         if (repo && ghDeployment) {
             github.updateDeploymentStatus(repo, ghDeployment.id, 'failure', err.message || 'Deployment failed');
@@ -148,7 +148,7 @@ async function main() {
             if (r.action === 'skipped') {
                 console.log(`  ${r.name.padEnd(40)} skipped`);
             } else {
-                const oldLabel = r.oldRemoved > 0 ? `  ${r.oldRemoved} old removed` : '';
+                const oldLabel = r.oldRemoved && r.oldRemoved > 0 ? `  ${r.oldRemoved} old removed` : '';
                 console.log(`  ${r.name.padEnd(40)} subscribed${oldLabel}`);
             }
         }
@@ -162,7 +162,7 @@ async function main() {
     }
 
     // Summary line
-    const parts = [];
+    const parts: string[] = [];
     if (envResults) {
         const updated = envResults.filter(r => r.updated).length;
         parts.push(`${updated} functions configured`);
