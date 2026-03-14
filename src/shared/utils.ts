@@ -1,5 +1,6 @@
 const SLEEP_TIME = 1000;
-async function sleep(ms) {
+
+async function sleep(ms?: number): Promise<void> {
     if( !ms ) {
         ms = SLEEP_TIME;
     }
@@ -14,21 +15,27 @@ const DECAY_FACTOR = 0.7;
 const BACKOFF_FACTOR = 2;
 const MAX_RETRIES = 8;
 
-function isThrottleError(error) {
+interface AWSError extends Error {
+    code?: string;
+    $metadata?: { httpStatusCode?: number };
+}
+
+function isThrottleError(error: unknown): boolean {
     if (!error) return false;
+    const err = error as AWSError;
     const throttleNames = [
         'TooManyRequestsException',
         'ThrottlingException',
         'Throttling',
         'RequestLimitExceeded'
     ];
-    if (throttleNames.includes(error.name)) return true;
-    if (error.$metadata && error.$metadata.httpStatusCode === 429) return true;
-    if (error.code && throttleNames.includes(error.code)) return true;
+    if (throttleNames.includes(err.name)) return true;
+    if (err.$metadata && err.$metadata.httpStatusCode === 429) return true;
+    if (err.code && throttleNames.includes(err.code)) return true;
     return false;
 }
 
-async function awsRetry(operation, maxRetries) {
+async function awsRetry<T>(operation: () => Promise<T>, maxRetries?: number): Promise<T> {
     if (maxRetries === undefined) maxRetries = MAX_RETRIES;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -57,6 +64,9 @@ async function awsRetry(operation, maxRetries) {
             throw error;
         }
     }
+
+    // Should not reach here, but TypeScript needs a return
+    throw new Error('Max retries exceeded');
 }
 
 module.exports = {sleep, awsRetry, isThrottleError};
