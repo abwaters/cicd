@@ -16,7 +16,12 @@
     "info": "node dist/index.js info",
     "clean": "node dist/index.js clean",
     "validate": "node dist/index.js validate",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": ["**/test/**/*.test.{js,ts}"]
   },
   "dependencies": {
     "@aws-sdk/client-api-gateway": "^3.1007.0",
@@ -30,7 +35,10 @@
     "twilio": "^5.13.0"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^25.5.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
