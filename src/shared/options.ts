@@ -1,4 +1,10 @@
-function camelCaseOption(opt) {
+import { CLIOptions } from '../types';
+
+const SHORT_FLAGS: Record<string, string> = {
+    '-nh': 'noHeader',
+};
+
+function camelCaseOption(opt: string): string {
       const parts = opt.split('-');
       let ccOpt = "";
       for(let i=0;i<parts.length;i++) {
@@ -11,13 +17,8 @@ function camelCaseOption(opt) {
       return ccOpt;
 }
 
-// Map of short flags to their long-form equivalents
-const SHORT_FLAGS = {
-    '-nh': 'noHeader',
-};
-
-function getOptions(args) {
-    const options = {};
+function getOptions(args: string[]): CLIOptions {
+    const options: CLIOptions = {};
     for(const arg of args) {
         if( arg.startsWith('--') ) {
             if( arg.includes('=') ) {
@@ -36,7 +37,7 @@ function getOptions(args) {
     return options;
 }
 
-function stripOptions(args) {
+function stripOptions(args: string[]): string[] {
     return args.filter(arg=>!arg.startsWith('--') && !SHORT_FLAGS[arg]);
 }
 
