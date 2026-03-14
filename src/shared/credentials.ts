@@ -1,14 +1,8 @@
-const {
-    STSClient,
-    GetCallerIdentityCommand
-} = require("@aws-sdk/client-sts");
+import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
+
 const { getConfig } = require('./config');
 
-/**
- * Validates that AWS credentials are properly configured
- * Provides clear error messages and guidance for setup
- */
-async function validateCredentials() {
+async function validateCredentials(): Promise<boolean> {
     try {
         const region = await getConfig('region');
         const client = new STSClient({ region });
@@ -18,7 +12,7 @@ async function validateCredentials() {
         await client.send(command);
 
         return true;
-    } catch (error) {
+    } catch (error: any) {
         // Handle different types of credential errors
         if (error.name === 'CredentialsProviderError' ||
             error.message?.includes('Could not load credentials') ||
@@ -55,6 +49,8 @@ async function validateCredentials() {
             process.exit(1);
         }
     }
+
+    return false;
 }
 
 module.exports = { validateCredentials };

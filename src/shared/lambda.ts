@@ -1,4 +1,4 @@
-const {
+import {
     PublishVersionCommand,
     ListVersionsByFunctionCommand,
     ListAliasesCommand,
@@ -11,14 +11,19 @@ const {
     UpdateFunctionConfigurationCommand,
     PutProvisionedConcurrencyConfigCommand,
     DeleteProvisionedConcurrencyConfigCommand,
-    AddPermissionCommand
-} = require("@aws-sdk/client-lambda");
+    AddPermissionCommand,
+    FunctionConfiguration,
+    CreateAliasCommandOutput
+} from "@aws-sdk/client-lambda";
+import * as crypto from 'crypto';
+import { VersionInfo, VersionListItem, AliasInfo } from '../types';
+
 const { getConfig } = require('./config');
 const { awsRetry } = require('./utils');
 
-let client = null;
+let client: LambdaClient | null = null;
 
-async function getClient() {
+async function getClient(): Promise<LambdaClient> {
     if (!client) {
         const region = await getConfig('region');
         client = new LambdaClient({ region });
@@ -26,37 +31,31 @@ async function getClient() {
     return client;
 }
 
-async function publishNewVersion(functionName,commit) {
+async function publishNewVersion(functionName: string, commit: string): Promise<VersionInfo | ''> {
     try {
-        // Create the command with the necessary parameters
         const command = new PublishVersionCommand({
             FunctionName: functionName,
             Description: commit
         });
         const lambdaClient = await getClient();
         const response = await awsRetry(() => lambdaClient.send(command));
-        return {version:response.Version,description:response.Description,arn:response.FunctionArn};
+        return {version: response.Version!, description: response.Description!, arn: response.FunctionArn!};
     } catch (error) {
         console.error("Error publishing Lambda version:", error);
     }
     return '';
 }
 
-/**
- * Lists all versions of a Lambda function
- * @param {string} functionName - The Lambda function name
- * @returns {Promise<Array>} Array of version objects with {version, description}, or empty array on error
- */
-async function listVersions(functionName) {
+async function listVersions(functionName: string): Promise<VersionListItem[]> {
     try {
         const command = new ListVersionsByFunctionCommand({
             FunctionName: functionName
         });
         const lambdaClient = await getClient();
         const response = await awsRetry(() => lambdaClient.send(command));
-        const versions = [];
+        const versions: VersionListItem[] = [];
         for(const version of (response.Versions || [])) {
-            versions.push({version:version.Version,description:version.Description});
+            versions.push({version: version.Version!, description: version.Description!});
         }
         return versions;
     } catch (error) {
@@ -65,21 +64,16 @@ async function listVersions(functionName) {
     }
 }
 
-/**
- * Lists all aliases for a Lambda function
- * @param {string} functionName - The Lambda function name
- * @returns {Promise<Array>} Array of alias objects with {alias, version}, or empty array on error
- */
-async function listAliases(functionName) {
+async function listAliases(functionName: string): Promise<AliasInfo[]> {
     try {
         const command = new ListAliasesCommand({
             FunctionName: functionName
         });
         const lambdaClient = await getClient();
         const response = await awsRetry(() => lambdaClient.send(command));
-        const aliases = [];
+        const aliases: AliasInfo[] = [];
         for(const alias of (response.Aliases || [])) {
-            aliases.push({alias:alias.Name,version:alias.FunctionVersion});
+            aliases.push({alias: alias.Name!, version: alias.FunctionVersion!});
         }
         return aliases;
     } catch (error) {
@@ -88,12 +82,7 @@ async function listAliases(functionName) {
     }
 }
 
-/**
- * Describes a Lambda function and returns its configuration
- * @param {string} functionName - The Lambda function name
- * @returns {Promise<Object|null>} Function configuration object, or null on error
- */
-async function describeFunction(functionName) {
+async function describeFunction(functionName: string): Promise<FunctionConfiguration | null | undefined> {
     try {
         const command = new GetFunctionCommand({
             FunctionName: functionName
@@ -107,12 +96,7 @@ async function describeFunction(functionName) {
     }
 }
 
-/**
- * Lists all tags for a Lambda function
- * @param {string} functionArn - The Lambda function ARN
- * @returns {Promise<Object>} Object containing tags as key-value pairs, or empty object on error
- */
-async function listFunctionTags(functionArn) {
+async function listFunctionTags(functionArn: string): Promise<Record<string, string>> {
     try {
         const command = new ListTagsCommand({
             Resource: functionArn
@@ -126,7 +110,7 @@ async function listFunctionTags(functionArn) {
     }
 }
 
-async function createAlias(functionName, commit, functionVersion) {
+async function createAlias(functionName: string, commit: string, functionVersion: string): Promise<CreateAliasCommandOutput | null> {
     try {
         const command = new CreateAliasCommand({
             FunctionName: functionName,
@@ -143,11 +127,10 @@ async function createAlias(functionName, commit, functionVersion) {
     return null;
 }
 
-async function addFunctionPermission(functionName, sourceArn,principal) {
+async function addFunctionPermission(functionName: string, sourceArn: string, principal: string): Promise<void> {
     try {
         // Create a deterministic StatementId to avoid accumulation
         // Use a hash of the source ARN and principal to make it unique but repeatable
-        const crypto = require('crypto');
         const hash = crypto.createHash('sha256')
             .update(`${sourceArn}-${principal}`)
             .digest('hex')
@@ -163,7 +146,7 @@ async function addFunctionPermission(functionName, sourceArn,principal) {
         });
         const lambdaClient = await getClient();
         await awsRetry(() => lambdaClient.send(command));
-    } catch (error) {
+    } catch (error: any) {
         // If permission already exists, that's fine - it means we've already added it
         if (error.name === 'ResourceConflictException') {
             // Permission already exists, no action needed
@@ -173,7 +156,7 @@ async function addFunctionPermission(functionName, sourceArn,principal) {
     }
 }
 
-async function deleteAlias(functionName, aliasName) {
+async function deleteAlias(functionName: string, aliasName: string): Promise<void> {
     const command = new DeleteAliasCommand({
         FunctionName: functionName,
         Name: aliasName
@@ -187,7 +170,7 @@ async function deleteAlias(functionName, aliasName) {
     }
 }
 
-async function deleteVersion(functionName, versionNumber) {
+async function deleteVersion(functionName: string, versionNumber: string): Promise<void> {
     const command = new DeleteFunctionCommand({
         FunctionName: `${functionName}:${versionNumber}`
     });
@@ -200,7 +183,7 @@ async function deleteVersion(functionName, versionNumber) {
     }
 }
 
-async function updateProvisionedConcurrency(functionName,aliasName,concurrency) {
+async function updateProvisionedConcurrency(functionName: string, aliasName: string, concurrency: number): Promise<void> {
     const lambdaClient = await getClient();
     if( concurrency ) {
         try {
@@ -224,17 +207,7 @@ async function updateProvisionedConcurrency(functionName,aliasName,concurrency) 
     }
 }
 
-/*
-const newEnvironmentVariables = {
-    "KEY1": "newValue1",
-    "KEY2": "newValue2",
-};
-
-aws lambda update-function-configuration --function-name myapp-ads --environment "Variables={DDB_ADS_TABLE_NAME=myapp-ads}"
-    myapp-ads
-{DDB_ADS_TABLE_NAME=myapp-ads}
- */
-async function updateEnvironmentVariables(functionName, envVars) {
+async function updateEnvironmentVariables(functionName: string, envVars: Record<string, string>): Promise<void> {
     try {
         const command = new UpdateFunctionConfigurationCommand({
             FunctionName: functionName,
@@ -244,7 +217,6 @@ async function updateEnvironmentVariables(functionName, envVars) {
         });
         const lambdaClient = await getClient();
         await awsRetry(() => lambdaClient.send(command));
-        //console.log(response);
     } catch (error) {
         console.error("Error updating Lambda environment variables:", error);
     }

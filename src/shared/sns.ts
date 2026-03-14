@@ -1,10 +1,12 @@
-const { SNSClient, SubscribeCommand, ListSubscriptionsByTopicCommand, UnsubscribeCommand } = require("@aws-sdk/client-sns");
+import { SNSClient, SubscribeCommand, ListSubscriptionsByTopicCommand, UnsubscribeCommand } from "@aws-sdk/client-sns";
+import { SubscriptionInfo } from '../types';
+
 const { getConfig } = require('./config');
 const { awsRetry } = require('./utils');
 
-let client = null;
+let client: SNSClient | null = null;
 
-async function getClient() {
+async function getClient(): Promise<SNSClient> {
     if (!client) {
         const region = await getConfig('region');
         client = new SNSClient({ region });
@@ -12,10 +14,10 @@ async function getClient() {
     return client;
 }
 
-async function subscribeLambdaToTopic(topicArn,lambdaArn) {
+async function subscribeLambdaToTopic(topicArn: string, lambdaArn: string): Promise<void> {
     try {
         const params = {
-            Protocol: "lambda",
+            Protocol: "lambda" as const,
             TopicArn: topicArn,
             Endpoint: lambdaArn
         };
@@ -27,27 +29,25 @@ async function subscribeLambdaToTopic(topicArn,lambdaArn) {
     }
 }
 
-/**
- * Lists all subscriptions for an SNS topic (with pagination support)
- * @param {string} topicArn - The SNS topic ARN
- * @returns {Promise<Array>} Array of subscription objects with {subscriptionArn, protocol, endpoint}, or empty array on error
- */
-async function listSubscriptionsByTopic(topicArn) {
+async function listSubscriptionsByTopic(topicArn: string): Promise<SubscriptionInfo[]> {
     try {
         let command = new ListSubscriptionsByTopicCommand({
             TopicArn: topicArn
         });
-        let subscriptions = [];
+        let subscriptions: SubscriptionInfo[] = [];
         const snsClient = await getClient();
         let response = await awsRetry(() => snsClient.send(command));
         for(const r of (response.Subscriptions || [])) {
-            subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
+            subscriptions.push({subscriptionArn: r.SubscriptionArn!, protocol: r.Protocol!, endpoint: r.Endpoint!});
         }
         while (response.NextToken) {
-            command.input.NextToken = response.NextToken;
+            command = new ListSubscriptionsByTopicCommand({
+                TopicArn: topicArn,
+                NextToken: response.NextToken
+            });
             response = await awsRetry(() => snsClient.send(command));
             for(const r of (response.Subscriptions || [])) {
-                subscriptions.push({subscriptionArn: r.SubscriptionArn, protocol: r.Protocol, endpoint: r.Endpoint});
+                subscriptions.push({subscriptionArn: r.SubscriptionArn!, protocol: r.Protocol!, endpoint: r.Endpoint!});
             }
         }
         return subscriptions;
@@ -57,7 +57,7 @@ async function listSubscriptionsByTopic(topicArn) {
     }
 }
 
-async function deleteSubscription(subscriptionArn) {
+async function deleteSubscription(subscriptionArn: string): Promise<void> {
     try {
         const command = new UnsubscribeCommand({
             SubscriptionArn: subscriptionArn,
@@ -69,4 +69,4 @@ async function deleteSubscription(subscriptionArn) {
     }
 }
 
-module.exports = {subscribeLambdaToTopic,listSubscriptionsByTopic, deleteSubscription };
+module.exports = {subscribeLambdaToTopic, listSubscriptionsByTopic, deleteSubscription};

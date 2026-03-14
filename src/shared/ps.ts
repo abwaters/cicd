@@ -1,11 +1,12 @@
-const { SSMClient, GetParameterCommand, GetParametersByPathCommand } = require("@aws-sdk/client-ssm");
+import { SSMClient, GetParameterCommand, GetParametersByPathCommand } from "@aws-sdk/client-ssm";
+
 const { getConfig } = require('./config');
 const { awsRetry } = require('./utils');
 
-let client = null;
-const psValues = new Map();
+let client: SSMClient | null = null;
+const psValues = new Map<string, string>();
 
-async function getClient() {
+async function getClient(): Promise<SSMClient> {
     if (!client) {
         const region = await getConfig('region');
         client = new SSMClient({ region });
@@ -13,19 +14,19 @@ async function getClient() {
     return client;
 }
 
-async function getParameterValue(parameterName, withDecryption) {
+async function getParameterValue(parameterName: string, withDecryption: boolean): Promise<string | null> {
     try {
         if( psValues.has(parameterName) ) {
-            return psValues.get(parameterName);
+            return psValues.get(parameterName)!;
         }
         const command = new GetParameterCommand({
             Name: parameterName,
-            WithDecryption: withDecryption, // Set to true if it's a SecureString
+            WithDecryption: withDecryption,
         });
 
         const ssmClient = await getClient();
         const response = await awsRetry(() => ssmClient.send(command));
-        const value = response.Parameter.Value || '';
+        const value = response.Parameter?.Value || '';
         psValues.set(parameterName, value);
         return value;
     } catch (error) {
@@ -34,7 +35,7 @@ async function getParameterValue(parameterName, withDecryption) {
     }
 }
 
-async function getParametersByPath(path, withDecryption) {
+async function getParametersByPath(path: string, withDecryption: boolean): Promise<Record<string, string>> {
     try {
         const command = new GetParametersByPathCommand({
             Path: path,
@@ -45,8 +46,8 @@ async function getParametersByPath(path, withDecryption) {
         const ssmClient = await getClient();
         const response = await awsRetry(() => ssmClient.send(command));
 
-        return response.Parameters.reduce((acc, param) => {
-            acc[param.Name] = param.Value || "";
+        return (response.Parameters || []).reduce((acc: Record<string, string>, param: any) => {
+            acc[param.Name!] = param.Value || "";
             return acc;
         }, {});
     } catch (error) {
@@ -55,4 +56,4 @@ async function getParametersByPath(path, withDecryption) {
     }
 }
 
-module.exports = {getParameterValue,getParametersByPath};
+module.exports = {getParameterValue, getParametersByPath};
