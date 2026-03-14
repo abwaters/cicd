@@ -32,7 +32,7 @@ function ghApi(method, path, body) {
         }
     }
 
-    const cmd = args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ');
+    const cmd = args.map(a => /[ &|<>^]/.test(a) ? `"${a}"` : a).join(' ');
     logger.verbose(`   - gh api: ${method} ${path}`);
     const result = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     return JSON.parse(result);
