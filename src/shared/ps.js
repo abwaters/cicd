@@ -1,5 +1,6 @@
 const { SSMClient, GetParameterCommand, GetParametersByPathCommand } = require("@aws-sdk/client-ssm");
 const { getConfig } = require('./config');
+const { awsRetry } = require('./utils');
 
 let client = null;
 const psValues = new Map();
@@ -23,7 +24,7 @@ async function getParameterValue(parameterName, withDecryption) {
         });
 
         const ssmClient = await getClient();
-        const response = await ssmClient.send(command);
+        const response = await awsRetry(() => ssmClient.send(command));
         const value = response.Parameter.Value || '';
         psValues.set(parameterName, value);
         return value;
@@ -42,7 +43,7 @@ async function getParametersByPath(path, withDecryption) {
         });
 
         const ssmClient = await getClient();
-        const response = await ssmClient.send(command);
+        const response = await awsRetry(() => ssmClient.send(command));
 
         return response.Parameters.reduce((acc, param) => {
             acc[param.Name] = param.Value || "";
