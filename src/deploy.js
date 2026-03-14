@@ -2,6 +2,7 @@ const cicd = require('./shared/cicd');
 const options = require("./shared/options");
 const credentials = require('./shared/credentials');
 const logger = require('./shared/logger');
+const github = require('./shared/github');
 const { printHeader } = require('./shared/header');
 
 const SLEEP_TIME = 2000;
@@ -64,25 +65,43 @@ async function main() {
     if (!o.noHeader) printHeader();
     console.log(`Deploying commit '${commit}' to '${stage}' stage...`);
 
+    // Create GitHub deployment if repo is configured
+    const repo = await cicd.getConfig("repo");
+    let ghDeployment = null;
+    if (repo) {
+        ghDeployment = github.createDeployment(repo, commit, stage, `Deploy ${appAlias} to ${stage}`);
+        if (ghDeployment) {
+            github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Deploying ${appAlias}`);
+        }
+    }
+
     let envResults = null;
     let apiResults = null;
     let snsResults = null;
     let twilioResult = null;
 
-    if( processEnv ) {
-        envResults = await cicd.processFunctionEnvironmentVars();
-    }
+    try {
+        if( processEnv ) {
+            envResults = await cicd.processFunctionEnvironmentVars();
+        }
 
-    if( processApi ) {
-        apiResults = await cicd.processApiGateway(stage,appAlias,commit,apiFilter);
-    }
+        if( processApi ) {
+            apiResults = await cicd.processApiGateway(stage,appAlias,commit,apiFilter);
+        }
 
-    if( processSns ) {
-        snsResults = await cicd.processSNS(stage,appAlias,commit);
-    }
+        if( processSns ) {
+            snsResults = await cicd.processSNS(stage,appAlias,commit);
+        }
 
-    if( processTwilioFlag ) {
-        twilioResult = await cicd.processTwilio(stage);
+        if( processTwilioFlag ) {
+            twilioResult = await cicd.processTwilio(stage);
+        }
+    } catch (err) {
+        // Update GitHub deployment status to failure
+        if (repo && ghDeployment) {
+            github.updateDeploymentStatus(repo, ghDeployment.id, 'failure', err.message || 'Deployment failed');
+        }
+        throw err;
     }
 
     // ── Print summary ─────────────────────────────────────────────────
@@ -164,6 +183,11 @@ async function main() {
         parts.push(`Twilio webhook ${twilioResult.action}`);
     }
     console.log(`\nSummary: ${parts.join(', ')}`);
+
+    // Update GitHub deployment status to success
+    if (repo && ghDeployment) {
+        github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Deployed ${appAlias} to ${stage}: ${parts.join(', ')}`);
+    }
 
     console.log();
     console.timeEnd("api cicd");
