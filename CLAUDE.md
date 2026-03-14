@@ -8,7 +8,7 @@ This is a custom AWS CI/CD deployment tool for managing Lambda functions, API Ga
 
 ## Core Commands
 
-All commands are accessed through the main CLI tool at `src/index.js`:
+All commands are accessed through the main CLI tool at `src/index.ts`:
 
 ```bash
 # Validate configuration before deploying
@@ -23,6 +23,13 @@ node src/index.js deploy <stage> <commit> --env          # Only update environme
 node src/index.js deploy <stage> <commit> --api          # Only update API Gateway
 node src/index.js deploy <stage> <commit> --sns          # Only update SNS topics
 node src/index.js deploy <stage> <commit> --api-filter=<api-name>  # Deploy specific API
+
+# Rollback a stage to a previous deployment
+node src/index.js rollback <stage>            # Rollback to the most recent prior successful deployment
+node src/index.js rollback <stage> <commit>   # Rollback to a specific commit
+
+# Options (same as deploy): --env, --api, --sns, --api-filter=<name>, --verbose
+# Requires 'repo' in cicd.json (uses GitHub Deployments API for history)
 
 # Get deployment information
 node src/index.js info              # Show current deployments for all stages
@@ -50,9 +57,9 @@ Environment variables support three resolution patterns:
 - `!ParameterStore <param-path>` - Resolves AWS Systems Manager parameters
 - `!SetEnv <env-var>` - Resolves from process environment variables
 
-Resolution happens in `cicd.js:resolveEnvironmentVariable()`, with stage-specific overrides applied after global variables.
+Resolution happens in `cicd.ts:resolveEnvironmentVariable()`, with stage-specific overrides applied after global variables.
 
-### Deployment Orchestration (`src/shared/cicd.js`)
+### Deployment Orchestration (`src/shared/cicd.ts`)
 
 The core orchestration module follows this flow:
 
@@ -89,6 +96,8 @@ Git commit-based versioning ties everything together:
 
 The `info` command reconstructs deployment state by reading API stage variables and SNS subscription endpoints (which contain alias in ARN).
 
+The `rollback` command queries GitHub deployment history via `github.listDeployments()`, identifies successful deployments, prompts for confirmation, then executes the same deploy operations targeting the prior commit. Requires `repo` in `cicd.json`.
+
 The `clean` command identifies active commits from stages/subscriptions, then deletes unused:
 - API Gateway deployments
 - Lambda aliases (not in active commits)
@@ -96,7 +105,7 @@ The `clean` command identifies active commits from stages/subscriptions, then de
 
 ### Key Data Structures
 
-The `cicd.js` module maintains several caches:
+The `cicd.ts` module maintains several caches:
 - `rawExports`: Map of all CloudFormation exports (name → value)
 - `exportMap`: Map of configured exports from `cicd.json` (name → config object with resolved value)
 - `functionMap`: Map of all Lambda functions (name → config object with resolved ARN)
@@ -106,34 +115,37 @@ The `cicd.js` module maintains several caches:
 ### AWS SDK Wrappers
 
 All AWS SDK calls go through wrapper modules in `src/shared/`:
-- `lambda.js` - Versions, aliases, permissions, concurrency, environment variables
-- `apigw.js` - Deployments, stages, custom domain mappings, base path mappings
-- `sns.js` - Topic subscriptions, unsubscribe
-- `cloudformation.js` - List exports
-- `ps.js` - Get Parameter Store values
+- `lambda.ts` - Versions, aliases, permissions, concurrency, environment variables
+- `apigw.ts` - Deployments, stages, custom domain mappings, base path mappings
+- `sns.ts` - Topic subscriptions, unsubscribe
+- `cloudformation.ts` - List exports
+- `ps.ts` - Get Parameter Store values
 - `sts.js` - Get caller identity
+- `github.js` - GitHub Deployments API (create, update status, list deployments)
+- `twilio.js` - Twilio messaging service and webhook management
 
 Each wrapper uses AWS SDK v3 with modular imports (`@aws-sdk/client-*`).
 
 ### Rate Limiting
 
-`utils.js` provides `sleep()` with configurable delays. Used throughout to avoid AWS API throttling:
+`utils.ts` provides `sleep()` with configurable delays. Used throughout to avoid AWS API throttling:
 - Default sleep: 1000ms (configurable via `SLEEP_TIME`)
 - Extended sleep: 2000ms (used for critical operations in `cicd.js`)
 
 ### Entry Points
 
-The main entry point is **`index.js`**, which routes to four subcommands:
-1. **`deploy.js`**: Parses CLI args, calls `cicd.processFunctionEnvironmentVars()`, `cicd.processApiGateway()`, `cicd.processSNS()`
-2. **`info.js`**: Lists stages, APIs, SNS topics; aggregates commit info from stage variables and subscriptions
-3. **`clean.js`**: Identifies active commits, deletes unused deployments/aliases/versions
-4. **`validate.js`**: Validates `cicd.json` against `cicd.schema.json` using AJV
+The main entry point is **`index.ts`**, which routes to five subcommands:
+1. **`deploy.ts`**: Parses CLI args, calls `cicd.processFunctionEnvironmentVars()`, `cicd.processApiGateway()`, `cicd.processSNS()`, `cicd.processTwilio()`
+2. **`rollback.ts`**: Fetches GitHub deployment history, prompts for confirmation, then reuses the same `cicd.*` functions as deploy to rollback to a prior commit
+3. **`info.ts`**: Lists stages, APIs, SNS topics; aggregates commit info from stage variables and subscriptions
+4. **`clean.ts`**: Identifies active commits, deletes unused deployments/aliases/versions
+5. **`validate.ts`**: Validates `cicd.json` against `cicd.schema.json` using AJV
 
-All use `options.js` for CLI argument parsing (supports `--option` and `--option=value` formats).
+All use `options.ts` for CLI argument parsing (supports `--option` and `--option=value` formats).
 
 ### Configuration Validation
 
-`validate.js` uses AJV to validate `cicd.json` against `cicd.schema.json`. Schema enforces:
+`validate.ts` uses AJV to validate `cicd.json` against `cicd.schema.json`. Schema enforces:
 - Required fields and data types
 - AWS account ID format (12 digits)
 - AWS region format
@@ -184,7 +196,7 @@ API Gateway throttling settings can be configured at two levels:
    - Overrides global throttle settings for specific stages
    - Allows different rate limits for dev/staging/prod environments
 
-**Implementation details** (`apigw.js`):
+**Implementation details** (`apigw.ts`):
 - Throttling uses AWS API Gateway patch operations when updating stages
 - Path format: `/*/*/throttling/rateLimit` and `/*/*/throttling/burstLimit`
 - The `/*/*/` prefix applies settings globally to all resource paths and HTTP methods

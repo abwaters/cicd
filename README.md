@@ -23,6 +23,7 @@ After global installation, you can use the `cicd` command from anywhere:
 ```bash
 cicd validate
 cicd deploy dev abc123
+cicd rollback prod
 cicd info
 cicd clean
 ```
@@ -34,6 +35,7 @@ If not installed globally, you can run commands using npm scripts or node direct
 ```bash
 npm run validate
 node src/index.js deploy dev abc123
+node src/index.js rollback prod
 node src/index.js info
 node src/index.js clean
 ```
@@ -72,6 +74,7 @@ The `cicd.schema.json` file defines the complete structure. Key elements:
   "app": "string",                     // Application name
   "account": "123456789012",           // AWS account ID (12 digits)
   "region": "us-east-1",               // AWS region
+  "repo": "owner/repo",               // Optional: GitHub repo for deployment tracking & rollback
   "environment": {},                   // Global environment variables
   "exports": [],                       // API and SNS resource configurations
   "stages": []                         // Deployment stages
@@ -176,6 +179,34 @@ cicd deploy prod abc123 --api
 cicd deploy staging abc123 --verbose
 ```
 
+### Rollback
+
+Rollback a stage to a previous deployment. Requires `repo` in `cicd.json` (uses GitHub Deployments API for history).
+
+```bash
+# Rollback to the most recent prior successful deployment
+cicd rollback <stage>
+
+# Rollback to a specific commit
+cicd rollback <stage> <commit>
+
+# Partial rollback (same flags as deploy)
+cicd rollback <stage> --env              # Only rollback environment variables
+cicd rollback <stage> --api              # Only rollback API Gateway
+cicd rollback <stage> --sns              # Only rollback SNS topics
+cicd rollback <stage> --api-filter=name  # Rollback specific API
+cicd rollback <stage> --verbose          # Enable verbose logging
+```
+
+Examples:
+```bash
+cicd rollback prod
+cicd rollback staging abc1234
+cicd rollback prod --api
+```
+
+The command fetches recent successful deployments from GitHub, displays a confirmation prompt showing the current and target commits, and executes the rollback using the same deployment operations as `deploy`.
+
 ### Info
 
 Show current deployments for all stages:
@@ -245,30 +276,40 @@ Lambda functions use Git commit-based versioning:
 - Lambda alias name: `<app>-<commit-hash>`
 - API Gateway stage variables: `Commit: <app>-<commit-hash>`
 
-This allows multiple versions to coexist and enables easy rollback by redeploying a previous commit.
+This allows multiple versions to coexist and enables easy rollback via the `rollback` command or by redeploying a previous commit.
 
 ## Architecture
 
 ### Key Files
 
-- **src/index.js**: Main CLI entry point with command routing
-- **src/deploy.js**: Deployment command implementation
-- **src/info.js**: Info command to show current deployments
-- **src/clean.js**: Clean command to remove unused resources
-- **src/validate.js**: Configuration validation command
-- **src/shared/cicd.js**: Core orchestration logic
-- **src/shared/lambda.js**: Lambda API wrapper
-- **src/shared/apigw.js**: API Gateway wrapper
-- **src/shared/sns.js**: SNS wrapper
-- **src/shared/cloudformation.js**: CloudFormation wrapper
-- **src/shared/ps.js**: Parameter Store wrapper
-- **src/shared/config.js**: Configuration loader
-- **src/shared/options.js**: CLI option parser
+- **src/index.ts**: Main CLI entry point with command routing
+- **src/deploy.ts**: Deployment command implementation
+- **src/rollback.ts**: Rollback command (uses GitHub deployment history)
+- **src/info.ts**: Info command to show current deployments
+- **src/clean.ts**: Clean command to remove unused resources
+- **src/validate.ts**: Configuration validation command
+- **src/types.ts**: TypeScript interfaces for config, results, and CLI options
+- **src/shared/cicd.ts**: Core orchestration logic
+- **src/shared/lambda.ts**: Lambda API wrapper
+- **src/shared/apigw.ts**: API Gateway wrapper
+- **src/shared/sns.ts**: SNS wrapper
+- **src/shared/cloudformation.ts**: CloudFormation wrapper
+- **src/shared/ps.ts**: Parameter Store wrapper
+- **src/shared/config.ts**: Configuration loader
+- **src/shared/options.ts**: CLI option parser
+- **src/shared/github.js**: GitHub Deployments API wrapper
+- **src/shared/twilio.js**: Twilio messaging service wrapper
+- **src/shared/credentials.ts**: AWS credential validation
+- **src/shared/logger.ts**: Logging utility with verbose mode
+- **src/shared/utils.ts**: Sleep/rate limiting utilities
+- **src/shared/header.ts**: CLI header display
 
 ### Dependencies
 
 - AWS SDK v3 clients for Lambda, API Gateway, SNS, CloudFormation, SSM, and STS
 - AJV for JSON schema validation
+- GitHub CLI (`gh`) for deployment tracking (optional, used by deploy/rollback)
+- Twilio SDK for messaging service management (optional)
 
 ## License
 
