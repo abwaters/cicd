@@ -37,6 +37,7 @@ function isThrottleError(error: unknown): boolean {
 
 async function awsRetry<T>(operation: () => Promise<T>, maxRetries?: number): Promise<T> {
     if (maxRetries === undefined) maxRetries = MAX_RETRIES;
+    let throttled = false;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         // Apply adaptive delay before each call
@@ -50,6 +51,7 @@ async function awsRetry<T>(operation: () => Promise<T>, maxRetries?: number): Pr
             // On success, decay delay toward 0
             adaptiveDelay = Math.floor(adaptiveDelay * DECAY_FACTOR);
             if (adaptiveDelay < 10) adaptiveDelay = 0;
+            if (throttled) process.stdout.write('\n');
             return result;
         } catch (error) {
             if (isThrottleError(error) && attempt < maxRetries) {
@@ -58,9 +60,11 @@ async function awsRetry<T>(operation: () => Promise<T>, maxRetries?: number): Pr
                     Math.max(adaptiveDelay * BACKOFF_FACTOR, MIN_THROTTLE_DELAY),
                     MAX_DELAY
                 );
-                console.log(`Throttled (attempt ${attempt}/${maxRetries}), waiting ${adaptiveDelay}ms...`);
+                process.stdout.write('.');
+                throttled = true;
                 continue;
             }
+            if (throttled) process.stdout.write('\n');
             throw error;
         }
     }
