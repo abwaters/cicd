@@ -51,7 +51,7 @@ async function main(): Promise<void> {
 
     // Fetch deployment history
     const deployments = github.listDeployments(repo, stage, 10);
-    const successful = deployments.filter((d: any) => d.status === 'success');
+    const successful = deployments.filter((d: any) => d.status === 'success' || d.status === 'inactive');
 
     if (successful.length < 2 && !targetCommit) {
         console.error(`Error: No prior successful deployment found for stage '${stage}' to rollback to.`);
