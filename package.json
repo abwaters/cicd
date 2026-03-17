@@ -29,7 +29,9 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testMatch": ["**/test/**/*.test.{js,ts}"]
+    "testMatch": [
+      "**/test/**/*.test.{js,ts}"
+    ]
   },
   "dependencies": {
     "@aws-sdk/client-api-gateway": "^3.1009.0",
