@@ -5,10 +5,19 @@ export interface CICDConfig {
     account: string;
     region: string;
     repo?: string;
+    computeMode?: 'lambda' | 'fargate';
+    fargate?: FargateConfig;
     environment?: Record<string, string>;
     throttle?: ThrottleSettings;
     exports: ExportConfig[];
     stages: StageConfig[];
+}
+
+export interface FargateConfig {
+    cluster: string;
+    ecrRepository: string;
+    containerName: string;
+    httpApi?: string;
 }
 
 export interface ThrottleSettings {
@@ -40,6 +49,8 @@ export interface StageConfig {
     environment?: Record<string, string>;
     throttle?: ThrottleSettings;
     twilio?: TwilioStageConfig;
+    service?: string;
+    taskFamily?: string;
 }
 
 export interface StageMapping {
@@ -260,6 +271,15 @@ export interface InfoTwilioResult {
 export interface InfoGitHubResult {
     stage: string;
     deployments: GitHubDeployment[];
+}
+
+// ─── Fargate Deploy Result Types ─────────────────────────────────────────────
+
+export interface FargateDeployResult {
+    taskDefinitionArn: string;
+    previousTaskDefinitionArn: string;
+    image: string;
+    serviceStable: boolean;
 }
 
 // ─── Clean Command Types ─────────────────────────────────────────────────────

@@ -40,8 +40,75 @@ async function main(): Promise<void> {
 
     console.time("api cicd");
     if (!o.noHeader) printHeader();
-    console.log(`Collecting information for stages...`);
+
+    const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
     const stages: StageConfig[] = await cicd.getConfig("stages");
+
+    if (computeMode === 'fargate') {
+        // ── Fargate info flow ────────────────────────────────────────
+        const ecs = require('./shared/ecs');
+        const fargateConfig = await cicd.resolveFargateConfig();
+
+        console.log(`Collecting Fargate service information...`);
+        console.log(`\nStages:`);
+
+        for (const stage of stages) {
+            if (!stage.service || !stage.taskFamily) {
+                console.log(`  ${stage.stage.padEnd(15)} not configured for fargate`);
+                continue;
+            }
+
+            try {
+                const serviceInfo = await ecs.describeService(fargateConfig.cluster, stage.service);
+                const taskDef = await ecs.describeTaskDefinition(serviceInfo.taskDefinitionArn);
+                const container = (taskDef.containerDefinitions || []).find((c: any) => c.name === fargateConfig.containerName);
+                const imageTag = container?.image?.split(':')[1] || 'unknown';
+                const commitEnv = (container?.environment || []).find((e: any) => e.name === 'COMMIT');
+                const commit = commitEnv?.value || imageTag;
+
+                console.log(`  ${stage.stage.padEnd(15)} ${commit}`);
+                if (o.details) {
+                    console.log(`    - service:    ${stage.service}`);
+                    console.log(`    - task def:   ${serviceInfo.taskDefinitionArn}`);
+                    console.log(`    - image:      ${container?.image || 'unknown'}`);
+                    console.log(`    - desired:    ${serviceInfo.desiredCount}`);
+                    console.log(`    - running:    ${serviceInfo.runningCount}`);
+                    console.log(`    - status:     ${serviceInfo.status}`);
+                }
+            } catch (e: any) {
+                console.log(`  ${stage.stage.padEnd(15)} error: ${e.message}`);
+            }
+        }
+
+        // GitHub Deployments
+        const repo = await cicd.getConfig("repo");
+        if (repo) {
+            const ghResults: InfoGitHubResult[] = [];
+            for (const stage of stages) {
+                const deployments: GitHubDeployment[] = github.listDeployments(repo, stage.stage, 5);
+                if (deployments.length > 0) {
+                    ghResults.push({ stage: stage.stage, deployments });
+                }
+            }
+            if (ghResults.length > 0) {
+                console.log(`\nGitHub Deployments:`);
+                for (const r of ghResults) {
+                    console.log(`  ${r.stage}:`);
+                    for (const d of r.deployments) {
+                        const ts = new Date(d.createdAt).toLocaleString();
+                        console.log(`    ${d.ref.padEnd(10)} ${d.status.padEnd(12)} ${ts}`);
+                    }
+                }
+            }
+        }
+
+        console.log();
+        console.timeEnd("api cicd");
+        return;
+    }
+
+    // ── Lambda info flow (existing behavior) ────────────────────────
+    console.log(`Collecting information for stages...`);
     const apis: ExportConfig[] = await cicd.getExportsByType('api');
     const topics: ExportConfig[] = await cicd.getExportsByType('sns');
     const topicFunctions: FunctionConfig[] = await cicd.getLambdaExports('sns');
