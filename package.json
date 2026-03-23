@@ -41,7 +41,7 @@
     "@aws-sdk/client-lambda": "^3.1015.0",
     "@aws-sdk/client-sns": "^3.1014.0",
     "@aws-sdk/client-ssm": "^3.1015.0",
-    "@aws-sdk/client-sts": "^3.1009.0",
+    "@aws-sdk/client-sts": "^3.1015.0",
     "ajv": "^8.18.0",
     "twilio": "^5.13.0"
   },
