@@ -34,7 +34,7 @@
     ]
   },
   "dependencies": {
-    "@aws-sdk/client-api-gateway": "^3.1009.0",
+    "@aws-sdk/client-api-gateway": "^3.1015.0",
     "@aws-sdk/client-apigatewayv2": "^3.1014.0",
     "@aws-sdk/client-cloudformation": "^3.1009.0",
     "@aws-sdk/client-ecs": "^3.1014.0",
