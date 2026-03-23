@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, TwilioDeployResult } from './types';
+import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResult } from './types';
 
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
@@ -63,10 +63,13 @@ async function main(): Promise<void> {
 
     console.time("api cicd");
     if (!o.noHeader) printHeader();
-    console.log(`Deploying commit '${commit}' to '${stage}' stage...`);
+
+    const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
+    const repo = await cicd.getConfig("repo");
+
+    console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]...`);
 
     // Create GitHub deployment if repo is configured
-    const repo = await cicd.getConfig("repo");
     let ghDeployment: any = null;
     if (repo) {
         ghDeployment = github.createDeployment(repo, commit, stage, `Deploy ${appAlias} to ${stage}`);
@@ -74,6 +77,41 @@ async function main(): Promise<void> {
             github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Deploying ${appAlias}`);
         }
     }
+
+    if (computeMode === 'fargate') {
+        // ── Fargate deploy flow ──────────────────────────────────────
+        try {
+            const result: FargateDeployResult = await cicd.processFargateDeploy(stage, commit);
+
+            console.log(`\nFargate Deployment:`);
+            console.log(`  Image:           ${result.image}`);
+            console.log(`  Task Definition: ${result.taskDefinitionArn}`);
+            console.log(`  Previous:        ${result.previousTaskDefinitionArn}`);
+            console.log(`  Service Stable:  ${result.serviceStable ? 'yes' : 'no'}`);
+
+            if (!result.serviceStable) {
+                console.log(`\n  WARNING: Service did not stabilize within timeout. Check ECS console.`);
+            }
+
+            const summary = `Fargate service updated to commit ${commit}`;
+            console.log(`\nSummary: ${summary}`);
+
+            if (repo && ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Deployed ${appAlias} to ${stage}: ${summary}`);
+            }
+        } catch (err: any) {
+            if (repo && ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'failure', err.message || 'Deployment failed');
+            }
+            throw err;
+        }
+
+        console.log();
+        console.timeEnd("api cicd");
+        return;
+    }
+
+    // ── Lambda deploy flow (existing behavior) ──────────────────────
 
     let envResults: EnvResult[] | null = null;
     let apiResults: APIResult | null = null;

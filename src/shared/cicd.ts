@@ -1,6 +1,8 @@
 import {
     ExportConfig,
     FunctionConfig,
+    FargateConfig,
+    FargateDeployResult,
     StageConfig,
     ThrottleSettings,
     EnvResult,
@@ -14,11 +16,13 @@ import {
     VersionInfo
 } from '../types';
 import { Deployment, Stage, BasePathMapping } from '@aws-sdk/client-api-gateway';
+import { ContainerDefinition } from '@aws-sdk/client-ecs';
 
 const lambda = require("./lambda");
 const apigw = require("./apigw");
 const sns = require("./sns");
 const twilio = require("./twilio");
+const ecs = require("./ecs");
 const cf = require('./cloudformation');
 const ps = require('./ps');
 const {getConfig} = require('./config');
@@ -30,10 +34,12 @@ const functionMap = new Map<string, FunctionConfig>();
 let envCache: Map<string, string> | null = null;
 const psCache = new Map<string, string>();
 let stageConfig: StageConfig | null = null;
+let exportsInitialized = false;
 
 async function init(): Promise<void> {
-    if( !exportMap || exportMap.size === 0 ) {
+    if( !exportsInitialized ) {
         await initExports();
+        exportsInitialized = true;
     }
 
     if( !envCache ) {
@@ -138,7 +144,7 @@ async function initEnvironment(): Promise<void> {
 
 async function initExports(): Promise<void> {
     try {
-        const exportConfigs: ExportConfig[] = await getConfig('exports');
+        const exportConfigs: ExportConfig[] = (await getConfig('exports')) || [];
         for(const cfg of exportConfigs) {
             exportMap.set(cfg.name,cfg);
             if( cfg.functions ) {
@@ -640,6 +646,128 @@ async function processTwilio(stage: string): Promise<TwilioDeployResult | null> 
     }
 }
 
+async function resolveFargateConfig(): Promise<{ cluster: string; ecrRepository: string; containerName: string; httpApi?: string }> {
+    const fargate: FargateConfig = await getConfig('fargate');
+    if (!fargate) {
+        throw new Error("'fargate' configuration is required when computeMode is 'fargate'");
+    }
+    const cluster = (await resolveVariable(fargate.cluster)) || fargate.cluster;
+    const ecrRepository = (await resolveVariable(fargate.ecrRepository)) || fargate.ecrRepository;
+    let httpApi: string | undefined;
+    if (fargate.httpApi) {
+        httpApi = (await resolveVariable(fargate.httpApi)) || fargate.httpApi;
+    }
+    return {
+        cluster,
+        ecrRepository,
+        containerName: fargate.containerName,
+        httpApi
+    };
+}
+
+async function processFargateDeploy(stage: string, commit: string): Promise<FargateDeployResult> {
+    await init();
+
+    const fargateConfig = await resolveFargateConfig();
+    const localStageConfig = await getStageConfig(stage);
+
+    if (!localStageConfig.service || !localStageConfig.taskFamily) {
+        throw new Error(`Stage '${stage}' is missing required 'service' or 'taskFamily' for fargate mode`);
+    }
+
+    const image = `${fargateConfig.ecrRepository}:${commit}`;
+    logger.verbose(`\n * Fargate deploy to service '${localStageConfig.service}':`);
+    logger.verbose(`   - image: ${image}`);
+
+    // 1. Get current service state
+    const serviceInfo = await ecs.describeService(fargateConfig.cluster, localStageConfig.service);
+    logger.verbose(`   - current task definition: ${serviceInfo.taskDefinitionArn}`);
+
+    // 2. Get current task definition for copying
+    const currentTaskDef = await ecs.describeTaskDefinition(serviceInfo.taskDefinitionArn);
+
+    // 3. Build merged environment variables
+    const resolvedEnvVars: Record<string, string> = {};
+    if (envCache) {
+        for (const [key, val] of envCache) {
+            resolvedEnvVars[key] = val;
+        }
+    }
+    resolvedEnvVars['COMMIT'] = commit;
+
+    // 4. Build new container definitions
+    const newContainerDefs: ContainerDefinition[] = (currentTaskDef.containerDefinitions || []).map((cd: ContainerDefinition) => {
+        if (cd.name === fargateConfig.containerName) {
+            // Start with existing env vars from task def (CF-sourced)
+            const existingEnv: Record<string, string> = {};
+            for (const e of (cd.environment || [])) {
+                if (e.name && e.value !== undefined) {
+                    existingEnv[e.name] = e.value;
+                }
+            }
+
+            // Merge CICD env vars on top
+            const mergedEnv = { ...existingEnv, ...resolvedEnvVars };
+            const envArray = Object.entries(mergedEnv).map(([name, value]) => ({ name, value }));
+
+            return { ...cd, image, environment: envArray };
+        }
+        return cd;
+    });
+
+    // 5. Register new task definition revision (use stage's taskFamily)
+    const taskDefWithFamily = {
+        ...currentTaskDef,
+        family: localStageConfig.taskFamily
+    };
+    const newTaskDefArn = await ecs.registerTaskDefinition(taskDefWithFamily, newContainerDefs);
+    logger.verbose(`   - registered new task definition: ${newTaskDefArn}`);
+
+    // 6. Update service
+    await ecs.updateService(fargateConfig.cluster, localStageConfig.service, newTaskDefArn);
+    logger.verbose(`   - service updated to new task definition`);
+
+    // 7. Wait for stability
+    logger.verbose(`   - waiting for service stability...`);
+    const stable = await ecs.waitForServicesStable(fargateConfig.cluster, localStageConfig.service);
+    if (stable) {
+        logger.verbose(`   - service is stable`);
+    } else {
+        logger.verbose(`   - WARNING: service did not stabilize within timeout`);
+    }
+
+    // 8. Ensure HTTP API custom domain mapping
+    if (fargateConfig.httpApi && localStageConfig.mapping) {
+        const domain = localStageConfig.mapping.domain;
+        const path = localStageConfig.mapping.path;
+        logger.verbose(`\n * Checking HTTP API mapping for ${domain} with path '${path}':`);
+
+        const existingMappings = await apigw.listApiMappingsV2(domain);
+        const existing = existingMappings.find((m: any) =>
+            m.ApiId === fargateConfig.httpApi && (m.ApiMappingKey || '') === (path || '')
+        );
+
+        if (existing) {
+            logger.verbose(`   - mapping already exists for ${domain}/${path}`);
+        } else {
+            logger.verbose(`   - creating mapping for ${domain} with path '${path}'`);
+            try {
+                await apigw.createCustomDomainMappingV2(domain, fargateConfig.httpApi, '$default', path);
+                logger.verbose(`   - mapping created`);
+            } catch (e: any) {
+                logger.verbose(`   x mapping creation failed: ${e.message}`);
+            }
+        }
+    }
+
+    return {
+        taskDefinitionArn: newTaskDefArn,
+        previousTaskDefinitionArn: serviceInfo.taskDefinitionArn,
+        image,
+        serviceStable: stable
+    };
+}
+
 module.exports = {
     getLambdaExports,
     getExportsByType,
@@ -649,5 +777,7 @@ module.exports = {
     processApiGateway,
     processSNS,
     processTwilio,
+    processFargateDeploy,
+    resolveFargateConfig,
     resolveVariable,
     setStageConfig};
