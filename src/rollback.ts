@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, TwilioDeployResult } from './types';
+import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResult } from './types';
 
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
@@ -144,9 +144,10 @@ async function main(): Promise<void> {
     // Execute rollback
     const commit = target.ref;
     const appAlias = `${app}-${commit}`;
+    const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
 
     console.time("rollback");
-    console.log(`\nRolling back to commit '${commit}' on '${stage}' stage...`);
+    console.log(`\nRolling back to commit '${commit}' on '${stage}' stage [${computeMode}]...`);
 
     // Create GitHub deployment for the rollback
     let ghDeployment: any = null;
@@ -154,6 +155,41 @@ async function main(): Promise<void> {
     if (ghDeployment) {
         github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Rolling back to ${appAlias}`);
     }
+
+    if (computeMode === 'fargate') {
+        // ── Fargate rollback flow ────────────────────────────────────
+        try {
+            const result: FargateDeployResult = await cicd.processFargateDeploy(stage, commit);
+
+            console.log(`\nFargate Rollback:`);
+            console.log(`  Image:           ${result.image}`);
+            console.log(`  Task Definition: ${result.taskDefinitionArn}`);
+            console.log(`  Previous:        ${result.previousTaskDefinitionArn}`);
+            console.log(`  Service Stable:  ${result.serviceStable ? 'yes' : 'no'}`);
+
+            if (!result.serviceStable) {
+                console.log(`\n  WARNING: Service did not stabilize within timeout. Check ECS console.`);
+            }
+
+            const summary = `Fargate service rolled back to commit ${commit}`;
+            console.log(`\nRollback complete: ${summary}`);
+
+            if (ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Rolled back ${appAlias} on ${stage}: ${summary}`);
+            }
+        } catch (err: any) {
+            if (ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'failure', err.message || 'Rollback failed');
+            }
+            throw err;
+        }
+
+        console.log();
+        console.timeEnd("rollback");
+        return;
+    }
+
+    // ── Lambda rollback flow (existing behavior) ────────────────────
 
     let envResults: EnvResult[] | null = null;
     let apiResults: APIResult | null = null;

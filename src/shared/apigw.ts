@@ -16,7 +16,9 @@ import {
 } from "@aws-sdk/client-api-gateway";
 import {
     ApiGatewayV2Client,
-    CreateApiMappingCommand
+    CreateApiMappingCommand,
+    GetApiMappingsCommand,
+    ApiMapping
 } from "@aws-sdk/client-apigatewayv2";
 import { ThrottleSettings, DeploymentInfo } from '../types';
 
@@ -232,6 +234,20 @@ async function createCustomDomainMappingV2(domainName: string, apiId: string, st
     }
 }
 
+async function listApiMappingsV2(domainName: string): Promise<ApiMapping[]> {
+    try {
+        const command = new GetApiMappingsCommand({
+            DomainName: domainName
+        });
+        const apiClientV2 = await getClientV2();
+        const response = await awsRetry(() => apiClientV2.send(command));
+        return response.Items || [];
+    } catch (error) {
+        console.error(`Error listing API mappings for domain ${domainName}:`, error);
+        return [];
+    }
+}
+
 async function deleteDeployment(apiId: string, deploymentId: string): Promise<void> {
     const command = new DeleteDeploymentCommand({
         restApiId: apiId,
@@ -246,4 +262,4 @@ async function deleteDeployment(apiId: string, deploymentId: string): Promise<vo
     }
 }
 
-module.exports = {createDeployment, createStage, deleteDeployment, createCustomDomainMapping, createCustomDomainMappingV2, listDeployments, listStages, updateStage, listBasePathMappings};
+module.exports = {createDeployment, createStage, deleteDeployment, createCustomDomainMapping, createCustomDomainMappingV2, listApiMappingsV2, listDeployments, listStages, updateStage, listBasePathMappings};

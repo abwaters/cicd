@@ -3,7 +3,16 @@
   "title": "CI/CD Configuration Schema",
   "description": "Schema for validating cicd.json configuration files for AWS Lambda/API Gateway/SNS deployments",
   "type": "object",
-  "required": ["app", "account", "region", "exports", "stages"],
+  "if": {
+    "properties": { "computeMode": { "const": "fargate" } },
+    "required": ["computeMode"]
+  },
+  "then": {
+    "required": ["app", "account", "region", "fargate", "stages"]
+  },
+  "else": {
+    "required": ["app", "account", "region", "exports", "stages"]
+  },
   "properties": {
     "app": {
       "type": "string",
@@ -24,6 +33,40 @@
       "type": "string",
       "description": "GitHub repository in owner/repo format for deployment tracking via gh CLI",
       "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+    },
+    "computeMode": {
+      "type": "string",
+      "enum": ["lambda", "fargate"],
+      "default": "lambda",
+      "description": "Compute mode: lambda (default) or fargate"
+    },
+    "fargate": {
+      "type": "object",
+      "description": "Fargate/ECS configuration (required when computeMode is fargate)",
+      "required": ["cluster", "ecrRepository", "containerName"],
+      "properties": {
+        "cluster": {
+          "type": "string",
+          "description": "ECS cluster ARN or name. Supports !ImportValue resolution.",
+          "minLength": 1
+        },
+        "ecrRepository": {
+          "type": "string",
+          "description": "ECR repository URI. Supports !ImportValue resolution.",
+          "minLength": 1
+        },
+        "containerName": {
+          "type": "string",
+          "description": "Container name within the task definition to update",
+          "minLength": 1
+        },
+        "httpApi": {
+          "type": "string",
+          "description": "HTTP API (API Gateway V2) ID for custom domain mappings. Supports !ImportValue resolution.",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
     },
     "environment": {
       "type": "object",
@@ -216,6 +259,16 @@
               }
             },
             "additionalProperties": false
+          },
+          "service": {
+            "type": "string",
+            "description": "ECS service name for this stage (required in fargate mode)",
+            "minLength": 1
+          },
+          "taskFamily": {
+            "type": "string",
+            "description": "ECS task definition family name for this stage (required in fargate mode)",
+            "minLength": 1
           }
         },
         "additionalProperties": false

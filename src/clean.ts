@@ -1,8 +1,9 @@
-import { ExportConfig, FunctionConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult } from './types';
+import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult } from './types';
 
 const sns = require('./shared/sns');
 const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
+const ecs = require('./shared/ecs');
 const cicd = require('./shared/cicd');
 const credentials = require('./shared/credentials');
 const options = require('./shared/options');
@@ -28,6 +29,53 @@ async function main(): Promise<void> {
 
     console.time("api cicd");
     if (!o.noHeader) printHeader();
+
+    const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
+
+    if (computeMode === 'fargate') {
+        // ── Fargate clean flow ───────────────────────────────────────
+        console.log(`Cleaning old Fargate task definition revisions...`);
+        const fargateConfig = await cicd.resolveFargateConfig();
+        const stages: StageConfig[] = await cicd.getConfig("stages");
+        let totalDeregistered = 0;
+
+        console.log(`\nTask Definition Cleanup:`);
+        for (const stage of stages) {
+            if (!stage.service || !stage.taskFamily) {
+                console.log(`  ${stage.stage.padEnd(15)} not configured for fargate`);
+                continue;
+            }
+
+            try {
+                const serviceInfo = await ecs.describeService(fargateConfig.cluster, stage.service);
+                const activeTaskDefArn = serviceInfo.taskDefinitionArn;
+
+                const revisions: string[] = await ecs.listTaskDefinitionRevisions(stage.taskFamily);
+                let deregistered = 0;
+                for (const rev of revisions) {
+                    if (rev !== activeTaskDefArn) {
+                        logger.verbose(`   - Deregistering ${rev}`);
+                        await ecs.deregisterTaskDefinition(rev);
+                        deregistered++;
+                    } else {
+                        logger.verbose(`   - Active: ${rev}`);
+                    }
+                }
+                totalDeregistered += deregistered;
+                const activeRevision = activeTaskDefArn.split(':').pop() || '?';
+                console.log(`  ${stage.stage.padEnd(15)} ${stage.taskFamily.padEnd(25)} active rev ${activeRevision}, ${deregistered} deregistered`);
+            } catch (e: any) {
+                console.log(`  ${stage.stage.padEnd(15)} error: ${e.message}`);
+            }
+        }
+
+        console.log(`\nSummary: Deregistered ${totalDeregistered} task definition revisions`);
+        console.log();
+        console.timeEnd("api cicd");
+        return;
+    }
+
+    // ── Lambda clean flow (existing behavior) ───────────────────────
     console.log(`Preparing clean api gateway deployments and lambda aliases/versions...`);
 
     // get list of exports from cloudformation
