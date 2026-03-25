@@ -3,6 +3,7 @@ import {
     FunctionConfig,
     FargateConfig,
     FargateDeployResult,
+    FargateRestartResult,
     StageConfig,
     ThrottleSettings,
     EnvResult,
@@ -768,6 +769,48 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
     };
 }
 
+async function processFargateRestart(stage: string, noWait: boolean = false): Promise<FargateRestartResult> {
+    await init();
+
+    const fargateConfig = await resolveFargateConfig();
+    const localStageConfig = await getStageConfig(stage);
+
+    if (!localStageConfig.service) {
+        throw new Error(`Stage '${stage}' is missing required 'service' for fargate mode`);
+    }
+
+    logger.verbose(`\n * Fargate restart for service '${localStageConfig.service}':`);
+
+    // 1. Get current service state
+    const serviceInfo = await ecs.describeService(fargateConfig.cluster, localStageConfig.service);
+    logger.verbose(`   - current task definition: ${serviceInfo.taskDefinitionArn}`);
+
+    // 2. Force new deployment
+    await ecs.forceUpdateService(fargateConfig.cluster, localStageConfig.service);
+    logger.verbose(`   - force new deployment triggered`);
+
+    // 3. Wait for stability (unless --no-wait)
+    let stable = true;
+    if (!noWait) {
+        logger.verbose(`   - waiting for service stability...`);
+        stable = await ecs.waitForServicesStable(fargateConfig.cluster, localStageConfig.service);
+        if (stable) {
+            logger.verbose(`   - service is stable`);
+        } else {
+            logger.verbose(`   - WARNING: service did not stabilize within timeout`);
+        }
+    } else {
+        logger.verbose(`   - skipping stability wait (--no-wait)`);
+    }
+
+    return {
+        cluster: fargateConfig.cluster,
+        service: localStageConfig.service,
+        taskDefinitionArn: serviceInfo.taskDefinitionArn,
+        serviceStable: stable
+    };
+}
+
 module.exports = {
     getLambdaExports,
     getExportsByType,
@@ -778,6 +821,7 @@ module.exports = {
     processSNS,
     processTwilio,
     processFargateDeploy,
+    processFargateRestart,
     resolveFargateConfig,
     resolveVariable,
     setStageConfig};

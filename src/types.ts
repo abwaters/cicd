@@ -282,6 +282,13 @@ export interface FargateDeployResult {
     serviceStable: boolean;
 }
 
+export interface FargateRestartResult {
+    cluster: string;
+    service: string;
+    taskDefinitionArn: string;
+    serviceStable: boolean;
+}
+
 // ─── Clean Command Types ─────────────────────────────────────────────────────
 
 export interface CleanApiResult {
