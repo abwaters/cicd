@@ -37,6 +37,9 @@ async function main(): Promise<void> {
             case 'rollback':
                 require('./rollback');
                 break;
+            case 'restart':
+                require('./restart');
+                break;
             default:
                 console.error(`Error: Unknown command '${command}'\n`);
                 showUsage();
@@ -64,6 +67,9 @@ Commands:
 
   rollback <stage> [commit]   Rollback a stage to a previous deployment
                               Options: --env, --api, --sns, --api-filter=<name>, --verbose
+
+  restart <stage>             Force restart a Fargate service (fargate mode only)
+                              Options: --no-wait, --verbose
 
   validate                    Validate cicd.json against schema
                               Options: --verbose
