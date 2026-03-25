@@ -98,6 +98,16 @@ async function updateService(cluster: string, service: string, taskDefinitionArn
     await awsRetry(() => ecsClient.send(command));
 }
 
+async function forceUpdateService(cluster: string, service: string): Promise<void> {
+    const ecsClient = await getClient();
+    const command = new UpdateServiceCommand({
+        cluster,
+        service,
+        forceNewDeployment: true
+    });
+    await awsRetry(() => ecsClient.send(command));
+}
+
 async function waitForServicesStable(cluster: string, service: string): Promise<boolean> {
     const ecsClient = await getClient();
     try {
@@ -143,6 +153,7 @@ module.exports = {
     describeTaskDefinition,
     registerTaskDefinition,
     updateService,
+    forceUpdateService,
     waitForServicesStable,
     listTaskDefinitionRevisions,
     deregisterTaskDefinition
