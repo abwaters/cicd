@@ -110,6 +110,8 @@ async function resolveVariable(key: string): Promise<string> {
             }
             psCache.set(psName, val);
         }
+    } else {
+        val = key;
     }
     return val;
 }
