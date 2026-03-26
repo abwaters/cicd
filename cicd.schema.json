@@ -75,6 +75,18 @@
         "type": "string"
       }
     },
+    "environmentGroups": {
+      "type": "object",
+      "description": "Named groups of environment variable names. Functions can reference groups with @groupName in their env field (e.g., '@twilio,DDB_TABLE')",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$"
+        },
+        "minItems": 1
+      }
+    },
     "throttle": {
       "type": "object",
       "description": "Global default API Gateway throttle settings for all stages and APIs (can be overridden at stage or API level)",
@@ -295,7 +307,7 @@
         "env": {
           "type": "string",
           "description": "Comma-separated list of environment variable names from global or stage environment",
-          "pattern": "^[A-Z_][A-Z0-9_]*(,[A-Z_][A-Z0-9_]*)*$"
+          "pattern": "^(@?[A-Za-z_][A-Za-z0-9_]*)(,@?[A-Za-z_][A-Za-z0-9_]*)*$"
         },
         "concurrency": {
           "type": "integer",
@@ -323,7 +335,7 @@
         "env": {
           "type": "string",
           "description": "Comma-separated list of environment variable names from global or stage environment",
-          "pattern": "^[A-Z_][A-Z0-9_]*(,[A-Z_][A-Z0-9_]*)*$"
+          "pattern": "^(@?[A-Za-z_][A-Za-z0-9_]*)(,@?[A-Za-z_][A-Za-z0-9_]*)*$"
         },
         "concurrency": {
           "type": "integer",

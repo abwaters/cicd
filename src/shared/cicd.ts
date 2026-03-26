@@ -60,14 +60,28 @@ async function getVar(key: string): Promise<string> {
     return val ;
 }
 
-function splitVars(varNames: string): string[] {
-    const names = varNames.split(',');
-    return names.map(n=>n.trim());
+async function expandVarNames(varNames: string): Promise<string[]> {
+    const names = varNames.split(',').map(n => n.trim());
+    const groups: Record<string, string[]> | undefined = await getConfig('environmentGroups');
+    const expanded: string[] = [];
+    for (const name of names) {
+        if (name.startsWith('@')) {
+            const groupName = name.substring(1);
+            if (groups && groups[groupName]) {
+                expanded.push(...groups[groupName]);
+            } else {
+                throw new Error(`Environment group '${groupName}' referenced but not defined in environmentGroups`);
+            }
+        } else {
+            expanded.push(name);
+        }
+    }
+    return expanded;
 }
 
 async function getVars(vars: string | string[] | undefined): Promise<Record<string, string> | null> {
     if( typeof vars === 'string' ) {
-        vars = splitVars(vars);
+        vars = await expandVarNames(vars);
     }
     if( !Array.isArray(vars) ) {
         return null;

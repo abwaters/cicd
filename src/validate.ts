@@ -63,11 +63,23 @@ function semanticValidation(config: CICDConfig): string[] {
             exportFunctionNames.add(f.name);
             allFunctionNames.add(f.name);
 
-            // Validate env var references exist
+            // Validate env var and group references exist
             if (f.env) {
                 const vars = f.env.split(',').map(v => v.trim());
                 for (const v of vars) {
-                    if (!envVarNames.has(v)) {
+                    if (v.startsWith('@')) {
+                        const groupName = v.substring(1);
+                        if (!config.environmentGroups || !config.environmentGroups[groupName]) {
+                            errors.push(`Function '${f.name}' references undefined environment group '${groupName}'`);
+                        } else {
+                            // Validate group members exist in environment
+                            for (const member of config.environmentGroups[groupName]) {
+                                if (!envVarNames.has(member)) {
+                                    errors.push(`Environment group '${groupName}' references undefined variable '${member}'`);
+                                }
+                            }
+                        }
+                    } else if (!envVarNames.has(v)) {
                         errors.push(`Function '${f.name}' references undefined environment variable '${v}'`);
                     }
                 }

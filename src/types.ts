@@ -8,6 +8,7 @@ export interface CICDConfig {
     computeMode?: 'lambda' | 'fargate';
     fargate?: FargateConfig;
     environment?: Record<string, string>;
+    environmentGroups?: Record<string, string[]>;
     throttle?: ThrottleSettings;
     exports: ExportConfig[];
     stages: StageConfig[];
