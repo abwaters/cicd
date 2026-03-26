@@ -114,6 +114,24 @@ async function main(): Promise<void> {
     const appAlias = `${app}-${commit}`;
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
 
+    // Safety check: verify rollback target aliases exist (Lambda mode only)
+    if (computeMode !== 'fargate') {
+        const { valid, warnings } = await cicd.validateRollbackTarget(appAlias);
+        if (!valid) {
+            console.log(`\nWARNING: Some Lambda aliases for '${appAlias}' are missing:`);
+            for (const w of warnings) {
+                console.log(`  ${w}`);
+            }
+            if (!dryRun) {
+                const proceed = await prompt(`Continue anyway? (y/N) `);
+                if (proceed !== 'y' && proceed !== 'yes') {
+                    console.log('Rollback aborted.');
+                    process.exit(0);
+                }
+            }
+        }
+    }
+
     console.time("rollback");
     console.log(`\nRolling back to commit '${commit}' on '${stage}' stage [${computeMode}]${dryRunLabel}...`);
 

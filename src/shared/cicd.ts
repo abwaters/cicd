@@ -834,11 +834,29 @@ async function processFargateRestart(stage: string, noWait: boolean = false): Pr
     };
 }
 
+async function validateRollbackTarget(appAlias: string): Promise<{ valid: boolean; warnings: string[] }> {
+    const warnings: string[] = [];
+    const apiFunctions = await getLambdaExports('api');
+    const snsFunctions = await getLambdaExports('sns');
+    const allFunctions = [...apiFunctions, ...snsFunctions];
+
+    for (const f of allFunctions) {
+        const functionName = f.value!;
+        const alias = await findAlias(functionName, appAlias);
+        if (!alias) {
+            warnings.push(`Alias '${appAlias}' not found for ${functionName} — will create from $LATEST`);
+        }
+    }
+
+    return { valid: warnings.length === 0, warnings };
+}
+
 module.exports = {
     getLambdaExports,
     getExportsByType,
     getConfig,
     getVar,
+    validateRollbackTarget,
     processFunctionEnvironmentVars,
     processApiGateway,
     processSNS,
