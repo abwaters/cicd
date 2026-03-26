@@ -6,7 +6,6 @@ import {
     UpdateServiceCommand,
     ListTaskDefinitionsCommand,
     DeregisterTaskDefinitionCommand,
-    waitUntilServicesStable,
     TaskDefinition,
     ContainerDefinition,
     RegisterTaskDefinitionCommandInput
@@ -110,15 +109,50 @@ async function forceUpdateService(cluster: string, service: string): Promise<voi
 
 async function waitForServicesStable(cluster: string, service: string): Promise<boolean> {
     const ecsClient = await getClient();
-    try {
-        await waitUntilServicesStable(
-            { client: ecsClient, maxWaitTime: 600 },
-            { cluster, services: [service] }
-        );
-        return true;
-    } catch (error) {
-        return false;
+    const maxWaitTime = 600;
+    const pollInterval = 15;
+    const startTime = Date.now();
+    const logger = require('./logger');
+
+    while ((Date.now() - startTime) / 1000 < maxWaitTime) {
+        const command = new DescribeServicesCommand({
+            cluster,
+            services: [service]
+        });
+        const response = await awsRetry(() => ecsClient.send(command));
+        const svc = response.services?.[0];
+        if (!svc) {
+            logger.verbose(`   - service not found, retrying...`);
+            await new Promise(r => setTimeout(r, pollInterval * 1000));
+            continue;
+        }
+
+        const primary = svc.deployments?.find((d: any) => d.status === 'PRIMARY');
+        const activeDeployments = svc.deployments?.filter((d: any) => d.status === 'ACTIVE') || [];
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        if (primary) {
+            logger.verbose(`   - [${elapsed}s] primary: ${primary.runningCount}/${primary.desiredCount} running, ${primary.rolloutState || 'unknown'}, ${activeDeployments.length} draining`);
+        }
+
+        // Consider stable when primary deployment has desired count running
+        // and its rollout is COMPLETED (don't wait for old deployments to fully drain)
+        if (primary && primary.rolloutState === 'COMPLETED') {
+            return true;
+        }
+
+        // Also accept: single deployment with running == desired (older ECS behavior)
+        if (svc.deployments?.length === 1 && primary &&
+            primary.runningCount === primary.desiredCount &&
+            (primary.desiredCount || 0) > 0) {
+            return true;
+        }
+
+        await new Promise(r => setTimeout(r, pollInterval * 1000));
     }
+
+    logger.verbose(`   - timed out after ${maxWaitTime}s`);
+    return false;
 }
 
 async function listTaskDefinitionRevisions(family: string): Promise<string[]> {
