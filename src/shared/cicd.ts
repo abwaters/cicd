@@ -303,6 +303,51 @@ async function findMapping(domain: string, apiId: string, stage: string): Promis
     return null;
 }
 
+async function processLambdaVersionAndAlias(
+    functionName: string,
+    appAlias: string,
+    commit: string,
+    concurrency?: number,
+    dryRun: boolean = false
+): Promise<{ action: 'created' | 'exists'; version: string }> {
+    if (dryRun) {
+        logger.verbose(`   - WOULD create version and alias '${appAlias}' for function '${functionName}'`);
+        if (concurrency) {
+            logger.verbose(`   - WOULD set concurrency to ${concurrency}`);
+        }
+        return { action: 'created', version: '(dry-run)' };
+    }
+
+    let version = await findVersion(functionName, commit);
+    let alias = await findAlias(functionName, appAlias);
+    if (alias) {
+        logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
+        if (concurrency) {
+            await lambda.updateProvisionedConcurrency(functionName, appAlias, Number(concurrency));
+            logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${concurrency}`);
+        }
+        return { action: 'exists', version };
+    }
+
+    if (!version) {
+        let v: VersionInfo = await lambda.publishNewVersion(functionName, appAlias);
+        version = v.version;
+        logger.verbose(`   - using version ${version} for '${commit}'`);
+        let arn = v.arn.substring(0, v.arn.lastIndexOf(':'));
+        let tags = await lambda.listFunctionTags(arn);
+        if (tags.Commit !== commit) {
+            logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
+        }
+    }
+    await lambda.createAlias(functionName, appAlias, version);
+    logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
+    if (concurrency) {
+        await lambda.updateProvisionedConcurrency(functionName, appAlias, Number(concurrency));
+        logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${concurrency}`);
+    }
+    return { action: 'created', version };
+}
+
 async function getStageConfig(stage: string): Promise<StageConfig> {
     const stageConfigs: StageConfig[] = await getConfig("stages");
     let foundConfig: StageConfig | null = null;
@@ -345,49 +390,13 @@ async function processFunctionEnvironmentVars(dryRun: boolean = false): Promise<
 }
 
 async function processApiGatewayFunctions(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIFunctionResult[]> {
-    const localStageConfig = await getStageConfig(stage);
     const functions =  await getLambdaExports('api',apiFilter);
     const results: APIFunctionResult[] = [];
     logger.verbose(`\n * Creating versions and aliases for functions:`);
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
-        const functionName = f.value!;
-        if (dryRun) {
-            logger.verbose(`   - WOULD create version and alias '${appAlias}' for function '${functionName}'`);
-            if (f.concurrency) {
-                logger.verbose(`   - WOULD set concurrency to ${f.concurrency}`);
-            }
-            results.push({ name: functionName, action: 'created', version: '(dry-run)' });
-            continue;
-        }
-        let version = await findVersion(functionName,commit);
-        let alias = await findAlias(functionName,appAlias);
-        if( alias ) {
-            logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
-            if( f.concurrency ) {
-                await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
-                logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
-            }
-            results.push({ name: functionName, action: 'exists', version });
-        }else{
-            if( !version ) {
-                let v: VersionInfo = await lambda.publishNewVersion(functionName,appAlias);
-                version = v.version;
-                logger.verbose(`   - using version ${version} for '${commit}'`);
-                let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                let tags = await lambda.listFunctionTags(arn);
-                if( tags.Commit !== commit ) {
-                    logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
-                }
-            }
-            await lambda.createAlias(functionName,appAlias,version);
-            logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
-            if( f.concurrency ) {
-                await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
-                logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
-            }
-            results.push({ name: functionName, action: 'created', version });
-        }
+        const { action, version } = await processLambdaVersionAndAlias(f.value!, appAlias, commit, f.concurrency, dryRun);
+        results.push({ name: f.value!, action, version });
     }
     return results;
 }
@@ -510,32 +519,8 @@ async function processSNSFunctions(stage: string, appAlias: string, commit: stri
     logger.verbose(`\nCreating versions and aliases for functions:`);
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
-        const functionName = f.value!;
-        if (dryRun) {
-            logger.verbose(`   - WOULD create version and alias '${appAlias}' for function '${functionName}'`);
-            results.push({ name: functionName, action: 'created', version: '(dry-run)' });
-            continue;
-        }
-        let version = await findVersion(functionName,commit);
-        let alias = await findAlias(functionName,appAlias);
-        if( alias ) {
-            logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
-            results.push({ name: functionName, action: 'exists', version });
-        }else if( !alias ) {
-            if( !version ) {
-                let v: VersionInfo = await lambda.publishNewVersion(functionName,appAlias);
-                version = v.version;
-                logger.verbose(`   - using version ${version} for '${commit}'`);
-                let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                let tags = await lambda.listFunctionTags(arn);
-                if( tags.Commit !== commit ) {
-                    logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
-                }
-            }
-            await lambda.createAlias(functionName,appAlias,version);
-            logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
-            results.push({ name: functionName, action: 'created', version });
-        }
+        const { action, version } = await processLambdaVersionAndAlias(f.value!, appAlias, commit, undefined, dryRun);
+        results.push({ name: f.value!, action, version });
     }
     return results;
 }
