@@ -1,5 +1,7 @@
 # CI/CD Tool Refactoring Plan
 
+*Last updated: 2026-03-26*
+
 ## Code Review Summary
 
 ### What Works Well
@@ -7,7 +9,7 @@
 - **Adaptive retry with exponential backoff**: Smart throttle detection with decay on success
 - **Typed result objects**: Good structured return types for deploy/rollback/clean summaries
 - **Dual compute mode**: Clean separation of Lambda vs Fargate flows
-- **Stage-specific config cascade**: Global → stage → API-level throttle/env resolution
+- **Stage-specific config cascade**: Global -> stage -> API-level throttle/env resolution
 
 ### Critical Issues
 
@@ -17,15 +19,31 @@
 
 3. **Mixed module systems** — TypeScript files use `import` for types but `require()` for all local modules. The `.js` files (github.js, twilio.js, sts.js) should be converted to TypeScript.
 
-4. **process.exit() scattered throughout** — At least 8 locations call `process.exit(-1)` deep inside library code (cicd.ts, getVar, initExports, getStageConfig). This makes error handling impossible for callers and prevents proper cleanup.
+4. **process.exit() scattered throughout** — 4 locations call `process.exit(-1)` deep inside cicd.ts (getVar, initExports, getStageConfig). This makes error handling impossible for callers and prevents proper cleanup.
 
 5. **Inconsistent error returns** — Some AWS wrappers return `null`/`''` on error, others throw. No structured error types.
 
-6. **SNS function processing is nearly identical to API function processing** — `processSNSFunctions()` (lines 487-515) is a near-clone of `processApiGatewayFunctions()` (lines 344-382), minus concurrency handling.
+6. **SNS function processing is nearly identical to API function processing** — `processSNSFunctions()` (lines 490-519) is a near-clone of `processApiGatewayFunctions()` (lines 347-385), minus concurrency handling.
 
 7. **No dry-run capability** — `--dryRun` exists in the options type but is never implemented. For a deployment tool, this is a significant gap.
 
 8. **`method` required on SNS functions** — The schema requires `method` on all functions via `functionConfig`, but SNS functions don't use HTTP methods. This is a schema modeling error.
+
+---
+
+## Completed Work
+
+### ~~Phase 5: Fargate Restart Command~~ DONE
+
+- [x] **5.1 Add `restart` subcommand** — `src/restart.ts` created, `src/index.ts` routes to it, `ecs.ts` has `forceUpdateService()` (#112)
+- [x] **5.2 Update index.ts routing** — Done as part of #112
+- [ ] **5.3 Restart-specific config** — Deferred (not needed yet)
+
+### Fargate Clean Enhancements (not in original plan) DONE
+
+- [x] **ECR image cleanup** — `src/shared/ecr.ts` created with `listImages`, `batchDeleteImages`, `parseRepositoryName`. Clean command deletes unused tagged and untagged ECR images (#115)
+- [x] **Task family deduplication** — Clean command deduplicates task families when multiple stages share one (#115)
+- [x] **Custom Fargate stability poller** — Replaced SDK waiter with custom poller in `ecs.ts` (#114)
 
 ---
 
@@ -70,7 +88,7 @@ export function scopeLabel(scope: DeployScope): string { ... }
 
 Convert `github.js`, `twilio.js`, and `sts.js` to TypeScript with proper types.
 
-**Files changed**: `github.js` → `github.ts`, `twilio.js` → `twilio.ts`, `sts.js` → `sts.ts`
+**Files changed**: `github.js` -> `github.ts`, `twilio.js` -> `twilio.ts`, `sts.js` -> `sts.ts`
 
 ---
 
@@ -78,7 +96,7 @@ Convert `github.js`, `twilio.js`, and `sts.js` to TypeScript with proper types.
 
 ### 2.1 Replace process.exit() with thrown errors
 
-Replace all `process.exit(-1)` calls in cicd.ts with proper error throwing. Let the command entry points (deploy.ts, rollback.ts, etc.) be the only places that call `process.exit()`.
+Replace all 4 `process.exit(-1)` calls in cicd.ts with proper error throwing. Let the command entry points (deploy.ts, rollback.ts, etc.) be the only places that call `process.exit()`.
 
 **Before:**
 ```typescript
@@ -320,120 +338,9 @@ async function validateRollbackTarget(commit: string, appAlias: string): Promise
 
 ---
 
-## Phase 5: Fargate Restart Command
+## Phase 5: Testing & Quality
 
-### 5.1 Add `restart` subcommand
-
-A restart forces new task deployment without changing the image or task definition. Use cases:
-- Pick up new environment variables (Parameter Store changes)
-- Recover from unhealthy tasks
-- Force fresh connections to downstream services
-
-**Implementation:**
-
-```typescript
-// src/restart.ts
-async function main(): Promise<void> {
-    await credentials.validateCredentials();
-
-    const args = options.stripOptions(process.argv.slice(2));
-    const o = options.getOptions(process.argv.slice(2));
-
-    if (args.length !== 1) {
-        console.log('restart <stage>');
-        process.exit(0);
-    }
-
-    const stage = args[0];
-    const computeMode = (await cicd.getConfig('computeMode')) || 'lambda';
-
-    if (computeMode !== 'fargate') {
-        console.error('Error: restart is only available in fargate mode');
-        process.exit(1);
-    }
-
-    await cicd.setStageConfig(stage);
-    const fargateConfig = await cicd.resolveFargateConfig();
-    const stageConfig = await cicd.getStageConfig(stage);
-
-    // Option A: Force new deployment (restarts tasks with same task def)
-    // This is the ECS equivalent of "restart" — it drains and replaces tasks
-    await ecs.updateService(
-        fargateConfig.cluster,
-        stageConfig.service,
-        null, // no task def change
-        { forceNewDeployment: true }
-    );
-
-    // Wait for stability
-    const stable = await ecs.waitForServicesStable(
-        fargateConfig.cluster,
-        stageConfig.service
-    );
-
-    console.log(`Service '${stageConfig.service}' restart ${stable ? 'complete' : 'timed out'}`);
-}
-```
-
-**Restart with env refresh option (`--env`):**
-```bash
-node src/index.js restart staging           # Force new deployment (same task def)
-node src/index.js restart staging --env     # Re-resolve env vars + register new task def + restart
-```
-
-The `--env` variant would:
-1. Re-resolve all `!ParameterStore` and `!ImportValue` variables
-2. Register a new task definition revision with updated env vars
-3. Update the service with the new task definition
-
-**ECS wrapper changes needed:**
-
-```typescript
-// ecs.ts - update updateService to support forceNewDeployment
-async function updateService(
-    cluster: string,
-    service: string,
-    taskDefinitionArn: string | null,
-    options?: { forceNewDeployment?: boolean }
-): Promise<void> {
-    const ecsClient = await getClient();
-    const input: any = { cluster, service };
-    if (taskDefinitionArn) input.taskDefinition = taskDefinitionArn;
-    if (options?.forceNewDeployment) input.forceNewDeployment = true;
-    const command = new UpdateServiceCommand(input);
-    await awsRetry(() => ecsClient.send(command));
-}
-```
-
-**Files changed**: New `src/restart.ts`, `src/index.ts` (add route), `src/shared/ecs.ts` (forceNewDeployment support)
-
-### 5.2 Update index.ts routing
-
-```typescript
-case 'restart':
-    require('./restart');
-    break;
-```
-
-### 5.3 Update schema for restart-specific config (optional)
-
-If restart needs configurable behavior (e.g., minimum healthy percent during restart), add to stage config:
-
-```json
-{
-    "stage": "prod",
-    "restart": {
-        "minimumHealthyPercent": 100,
-        "maximumPercent": 200
-    }
-}
-```
-
----
-
-## Phase 6: Testing & Quality
-
-### 6.1 Add unit tests for extracted modules
+### 5.1 Add unit tests for extracted modules
 
 With the refactoring from Phase 1-2, write tests for:
 - `scope.ts` — option resolution logic
@@ -441,7 +348,7 @@ With the refactoring from Phase 1-2, write tests for:
 - `cicd.ts` — resolveVariable() (mock PS/CF)
 - `validate.ts` — semantic validation
 
-### 6.2 Add integration test scaffolding
+### 5.2 Add integration test scaffolding
 
 Create a mock AWS setup using `aws-sdk-client-mock` for:
 - Full deploy flow (Lambda + API Gateway + SNS)
@@ -449,7 +356,7 @@ Create a mock AWS setup using `aws-sdk-client-mock` for:
 - Clean flow
 - Fargate deploy + restart
 
-### 6.3 Add consistent logging
+### 5.3 Add consistent logging
 
 Replace all `console.log` in library code (`cicd.ts`, wrapper modules) with `logger.log`/`logger.verbose`. Reserve `console.log` for subcommand output only.
 
@@ -459,21 +366,21 @@ Replace all `console.log` in library code (`cicd.ts`, wrapper modules) with `log
 
 ## Implementation Priority
 
-| Priority | Phase | Effort | Impact | Risk |
-|----------|-------|--------|--------|------|
-| 1 | 5.1 Fargate restart command | Small | High | Low |
-| 2 | 1.1-1.2 Extract shared utilities | Small | Medium | Low |
-| 3 | 2.1 Replace process.exit with errors | Small | High | Low |
-| 4 | 3.1 Split function config in schema | Small | Medium | Low |
-| 5 | 4.1 Dry-run mode | Medium | High | Low |
-| 6 | 2.2 Deduplicate version/alias logic | Small | Medium | Low |
-| 7 | 3.2 Semantic validation | Small | Medium | Low |
-| 8 | 4.3 Rollback safety checks | Small | High | Low |
-| 9 | 3.3 Environment variable groups | Medium | Medium | Low |
-| 10 | 1.3 Convert .js to TypeScript | Medium | Low | Low |
-| 11 | 4.2 Deployment verification | Medium | Medium | Low |
-| 12 | 2.3-2.4 ES imports + class encapsulation | Large | Medium | Medium |
-| 13 | 6.1-6.3 Testing & logging | Large | High | Low |
+| Priority | Phase | Effort | Impact | Risk | Status |
+|----------|-------|--------|--------|------|--------|
+| ~~1~~ | ~~5.1 Fargate restart command~~ | ~~Small~~ | ~~High~~ | ~~Low~~ | **DONE** (#112) |
+| 2 | 1.1-1.2 Extract shared utilities | Small | Medium | Low | |
+| 3 | 2.1 Replace process.exit with errors | Small | High | Low | |
+| 4 | 3.1 Split function config in schema | Small | Medium | Low | |
+| 5 | 4.1 Dry-run mode | Medium | High | Low | |
+| 6 | 2.2 Deduplicate version/alias logic | Small | Medium | Low | |
+| 7 | 3.2 Semantic validation | Small | Medium | Low | |
+| 8 | 4.3 Rollback safety checks | Small | High | Low | |
+| 9 | 3.3 Environment variable groups | Medium | Medium | Low | |
+| 10 | 1.3 Convert .js to TypeScript | Medium | Low | Low | |
+| 11 | 4.2 Deployment verification | Medium | Medium | Low | |
+| 12 | 2.3-2.4 ES imports + class encapsulation | Large | Medium | Medium | |
+| 13 | 5.1-5.3 Testing & logging | Large | High | Low | |
 
 ---
 
@@ -484,10 +391,9 @@ Changes to `cicd.schema.json`:
 1. **Split `functionConfig`** into `apiFunctionConfig` (with `method`) and `snsFunctionConfig` (without `method`)
 2. **Add `environmentGroups`** — optional object at root level for named variable groups
 3. **Add `description`** — optional string on exports and stages
-4. **Add `restart`** — optional object on stage config for Fargate restart behavior
-5. **Add validation** that `burstLimit >= rateLimit` (semantic, not schema-level)
-6. **Add validation** that SNS `stages` entries match defined stage names (semantic)
-7. **Consider `computeMode: "fargate"` requiring `service`/`taskFamily` on each stage** — currently not enforced by schema
+4. **Add validation** that `burstLimit >= rateLimit` (semantic, not schema-level)
+5. **Add validation** that SNS `stages` entries match defined stage names (semantic)
+6. **Consider `computeMode: "fargate"` requiring `service`/`taskFamily` on each stage** — currently not enforced by schema
 
 ---
 
@@ -495,6 +401,5 @@ Changes to `cicd.schema.json`:
 
 - All changes are backwards-compatible with existing `cicd.json` files
 - Schema changes add optional fields only; no existing configs will break
-- The `restart` command is additive — no existing commands change behavior
 - Phase 2 refactoring is internal; external CLI interface stays the same
 - Recommended: run `npm run validate` after each schema change to verify
