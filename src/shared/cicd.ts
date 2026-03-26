@@ -55,8 +55,7 @@ async function getVar(key: string): Promise<string> {
         val = envCache!.get(key)!;
     }
     if( !val ) {
-        console.log(`VARIABLE ${key} is empty.`);
-        process.exit(-1);
+        throw new Error(`Environment variable '${key}' resolved to empty value`);
     }
     return val ;
 }
@@ -186,7 +185,7 @@ async function initExports(): Promise<void> {
             }
         }
         if( cnt ) {
-            process.exit(-1);
+            throw new Error(`${cnt} export(s) could not be resolved — see errors above`);
         }
 
         // update values for any items that don't have values
@@ -206,9 +205,7 @@ async function initExports(): Promise<void> {
         }
 
     }catch(e) {
-        console.log(e);
-        console.log(`ERROR: couldn't get exports`);
-        process.exit(-1);
+        throw new Error(`Failed to initialize exports: ${e instanceof Error ? e.message : e}`);
     }
 }
 
@@ -317,8 +314,7 @@ async function getStageConfig(stage: string): Promise<StageConfig> {
     }
 
     if( !foundConfig ) {
-        console.log(`No configuration for ${stage}`);
-        process.exit(-1);
+        throw new Error(`No configuration found for stage '${stage}'`);
     }
     return foundConfig!;
 }
