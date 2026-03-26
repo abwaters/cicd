@@ -2,6 +2,8 @@ import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResul
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope } from './shared/scope';
 
+const verify = require('./shared/verify');
+
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
 const credentials = require('./shared/credentials');
@@ -123,6 +125,12 @@ async function main(): Promise<void> {
 
     const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, twilio: twilioResult });
     console.log(`\nSummary: ${parts.join(', ')}`);
+
+    // Verify deployment (skip in dry-run)
+    if (!dryRun) {
+        const verifyResult = await verify.verifyDeployment(stage, appAlias);
+        verify.printVerificationResult(verifyResult);
+    }
 
     // Update GitHub deployment status to success
     if (repo && ghDeployment) {
