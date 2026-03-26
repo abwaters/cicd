@@ -1,4 +1,5 @@
 import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResult } from './types';
+import { printDeploymentSummary } from './shared/summary';
 
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
@@ -144,82 +145,7 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
-    // Environment Variables
-    if (envResults && envResults.length > 0) {
-        console.log(`\nEnvironment Variables:`);
-        for (const r of envResults) {
-            const status = r.updated ? `${r.varCount} vars` : 'skipped';
-            console.log(`  ${r.name.padEnd(40)} ${status}`);
-        }
-    }
-
-    // API Functions
-    if (apiResults && apiResults.functions.length > 0) {
-        console.log(`\nAPI Functions:`);
-        for (const r of apiResults.functions) {
-            const versionLabel = r.version ? `v${r.version}` : '';
-            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
-        }
-    }
-
-    // API Deployments
-    if (apiResults && apiResults.apis.length > 0) {
-        console.log(`\nAPI Deployments:`);
-        for (const r of apiResults.apis) {
-            console.log(`  ${r.name.padEnd(40)} deployment ${r.deployment.padEnd(10)} stage ${r.stage.padEnd(10)} mapping ${r.mapping}`);
-        }
-    }
-
-    // SNS Functions
-    if (snsResults && snsResults.functions.length > 0) {
-        console.log(`\nSNS Functions:`);
-        for (const r of snsResults.functions) {
-            const versionLabel = r.version ? `v${r.version}` : '';
-            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
-        }
-    }
-
-    // SNS Subscriptions
-    if (snsResults && snsResults.subscriptions.length > 0) {
-        console.log(`\nSNS Subscriptions:`);
-        for (const r of snsResults.subscriptions) {
-            if (r.action === 'skipped') {
-                console.log(`  ${r.name.padEnd(40)} skipped`);
-            } else {
-                const oldLabel = r.oldRemoved && r.oldRemoved > 0 ? `  ${r.oldRemoved} old removed` : '';
-                console.log(`  ${r.name.padEnd(40)} subscribed${oldLabel}`);
-            }
-        }
-    }
-
-    // Twilio
-    if (twilioResult) {
-        console.log(`\nTwilio:`);
-        const twilioLabel = twilioResult.messagingSid;
-        console.log(`  ${twilioLabel.padEnd(40)} ${twilioResult.webhookUrl}`);
-    }
-
-    // Summary line
-    const parts: string[] = [];
-    if (envResults) {
-        const updated = envResults.filter(r => r.updated).length;
-        parts.push(`${updated} functions configured`);
-    }
-    if (apiResults) {
-        const created = apiResults.functions.filter(r => r.action === 'created').length;
-        const existing = apiResults.functions.filter(r => r.action === 'exists').length;
-        parts.push(`${apiResults.apis.length} APIs deployed (${created} new, ${existing} existing)`);
-    }
-    if (snsResults) {
-        const subscribed = snsResults.subscriptions.filter(r => r.action === 'subscribed').length;
-        const skipped = snsResults.subscriptions.filter(r => r.action === 'skipped').length;
-        if (subscribed > 0 || skipped > 0) {
-            parts.push(`${subscribed} topics subscribed${skipped > 0 ? `, ${skipped} skipped` : ''}`);
-        }
-    }
-    if (twilioResult) {
-        parts.push(`Twilio webhook ${twilioResult.action}`);
-    }
+    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, twilio: twilioResult });
     console.log(`\nSummary: ${parts.join(', ')}`);
 
     // Update GitHub deployment status to success
