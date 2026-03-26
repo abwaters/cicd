@@ -1,9 +1,10 @@
-import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult } from './types';
+import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult, CleanEcrResult } from './types';
 
 const sns = require('./shared/sns');
 const lambda = require('./shared/lambda');
 const apigw = require('./shared/apigw');
 const ecs = require('./shared/ecs');
+const ecr = require('./shared/ecr');
 const cicd = require('./shared/cicd');
 const credentials = require('./shared/credentials');
 const options = require('./shared/options');
@@ -34,23 +35,38 @@ async function main(): Promise<void> {
 
     if (computeMode === 'fargate') {
         // ── Fargate clean flow ───────────────────────────────────────
-        console.log(`Cleaning old Fargate task definition revisions...`);
+        console.log(`Cleaning old Fargate task definition revisions and ECR images...`);
         const fargateConfig = await cicd.resolveFargateConfig();
         const stages: StageConfig[] = await cicd.getConfig("stages");
         let totalDeregistered = 0;
+        const activeTags = new Set<string>();
 
-        console.log(`\nTask Definition Cleanup:`);
+        // Deduplicate task families — multiple stages may share one
+        const familyMap = new Map<string, { stages: string[]; service: string }>();
         for (const stage of stages) {
-            if (!stage.service || !stage.taskFamily) {
-                console.log(`  ${stage.stage.padEnd(15)} not configured for fargate`);
-                continue;
+            if (!stage.service || !stage.taskFamily) continue;
+            if (!familyMap.has(stage.taskFamily)) {
+                familyMap.set(stage.taskFamily, { stages: [stage.stage], service: stage.service });
+            } else {
+                familyMap.get(stage.taskFamily)!.stages.push(stage.stage);
             }
+        }
 
+        // ── Phase 1: Task definition cleanup ─────────────────────────
+        console.log(`\nTask Definition Cleanup:`);
+        for (const [taskFamily, info] of familyMap) {
             try {
-                const serviceInfo = await ecs.describeService(fargateConfig.cluster, stage.service);
+                const serviceInfo = await ecs.describeService(fargateConfig.cluster, info.service);
                 const activeTaskDefArn = serviceInfo.taskDefinitionArn;
 
-                const revisions: string[] = await ecs.listTaskDefinitionRevisions(stage.taskFamily);
+                // Extract active image tag from the task definition
+                const taskDef = await ecs.describeTaskDefinition(activeTaskDefArn);
+                const container = (taskDef.containerDefinitions || [])
+                    .find((c: any) => c.name === fargateConfig.containerName);
+                const imageTag = container?.image?.split(':')[1];
+                if (imageTag) activeTags.add(imageTag);
+
+                const revisions: string[] = await ecs.listTaskDefinitionRevisions(taskFamily);
                 let deregistered = 0;
                 for (const rev of revisions) {
                     if (rev !== activeTaskDefArn) {
@@ -63,13 +79,51 @@ async function main(): Promise<void> {
                 }
                 totalDeregistered += deregistered;
                 const activeRevision = activeTaskDefArn.split(':').pop() || '?';
-                console.log(`  ${stage.stage.padEnd(15)} ${stage.taskFamily.padEnd(25)} active rev ${activeRevision}, ${deregistered} deregistered`);
+                const stageLabel = info.stages.join(', ');
+                console.log(`  ${taskFamily.padEnd(30)} active rev ${activeRevision}, ${deregistered} deregistered (${stageLabel})`);
             } catch (e: any) {
-                console.log(`  ${stage.stage.padEnd(15)} error: ${e.message}`);
+                const stageLabel = info.stages.join(', ');
+                console.log(`  ${taskFamily.padEnd(30)} error: ${e.message} (${stageLabel})`);
             }
         }
 
-        console.log(`\nSummary: Deregistered ${totalDeregistered} task definition revisions`);
+        // ── Phase 2: ECR image cleanup ───────────────────────────────
+        let totalEcrDeleted = 0;
+        let totalEcrFailures = 0;
+        console.log(`\nECR Image Cleanup:`);
+
+        if (activeTags.size === 0) {
+            console.log(`  Skipping: no active stages found`);
+        } else {
+            try {
+                const repositoryName = ecr.parseRepositoryName(fargateConfig.ecrRepository);
+                const allImages = await ecr.listImages(repositoryName);
+
+                const toDelete = allImages.filter((img: any) => {
+                    if (!img.imageTag) return true; // untagged — always clean up
+                    return !activeTags.has(img.imageTag);
+                });
+
+                const activeCount = allImages.length - toDelete.length;
+                const activeTagList = [...activeTags].map(t => t.substring(0, 7)).join(', ');
+
+                if (toDelete.length > 0) {
+                    const result = await ecr.batchDeleteImages(repositoryName, toDelete);
+                    totalEcrDeleted = result.deleted;
+                    totalEcrFailures = result.failures;
+                    console.log(`  ${repositoryName.padEnd(30)} ${totalEcrDeleted} deleted, ${activeCount} active (${activeTagList})`);
+                    if (totalEcrFailures > 0) {
+                        console.log(`  ${' '.padEnd(30)} ${totalEcrFailures} failures`);
+                    }
+                } else {
+                    console.log(`  ${repositoryName.padEnd(30)} no unused images, ${activeCount} active (${activeTagList})`);
+                }
+            } catch (e: any) {
+                console.log(`  error: ${e.message}`);
+            }
+        }
+
+        console.log(`\nSummary: Deregistered ${totalDeregistered} task definition revisions, deleted ${totalEcrDeleted} ECR images`);
         console.log();
         console.timeEnd("api cicd");
         return;
