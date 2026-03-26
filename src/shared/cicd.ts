@@ -319,7 +319,7 @@ async function getStageConfig(stage: string): Promise<StageConfig> {
     return foundConfig!;
 }
 
-async function processFunctionEnvironmentVars(): Promise<EnvResult[]> {
+async function processFunctionEnvironmentVars(dryRun: boolean = false): Promise<EnvResult[]> {
     const apiFunctions =  await getLambdaExports('api');
     const snsFunctions =  await getLambdaExports('sns');
     const functions = [...apiFunctions,...snsFunctions];
@@ -329,8 +329,12 @@ async function processFunctionEnvironmentVars(): Promise<EnvResult[]> {
         const functionName = f.value!;
         const funcEnv = await getVars(f.env);
         if( funcEnv ) {
-            logger.verbose(`   - setting environment vars for function: '${functionName}'...`);
-            await lambda.updateEnvironmentVariables(functionName,funcEnv);
+            if (dryRun) {
+                logger.verbose(`   - WOULD set ${Object.keys(funcEnv).length} environment vars for function: '${functionName}'`);
+            } else {
+                logger.verbose(`   - setting environment vars for function: '${functionName}'...`);
+                await lambda.updateEnvironmentVariables(functionName,funcEnv);
+            }
             results.push({ name: functionName, updated: true, varCount: Object.keys(funcEnv).length });
         } else {
             logger.verbose(`     x no vars for '${functionName}'`);
@@ -340,7 +344,7 @@ async function processFunctionEnvironmentVars(): Promise<EnvResult[]> {
     return results;
 }
 
-async function processApiGatewayFunctions(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIFunctionResult[]> {
+async function processApiGatewayFunctions(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIFunctionResult[]> {
     const localStageConfig = await getStageConfig(stage);
     const functions =  await getLambdaExports('api',apiFilter);
     const results: APIFunctionResult[] = [];
@@ -348,6 +352,14 @@ async function processApiGatewayFunctions(stage: string, appAlias: string, commi
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
         const functionName = f.value!;
+        if (dryRun) {
+            logger.verbose(`   - WOULD create version and alias '${appAlias}' for function '${functionName}'`);
+            if (f.concurrency) {
+                logger.verbose(`   - WOULD set concurrency to ${f.concurrency}`);
+            }
+            results.push({ name: functionName, action: 'created', version: '(dry-run)' });
+            continue;
+        }
         let version = await findVersion(functionName,commit);
         let alias = await findAlias(functionName,appAlias);
         if( alias ) {
@@ -380,7 +392,7 @@ async function processApiGatewayFunctions(stage: string, appAlias: string, commi
     return results;
 }
 
-async function processApiGatewayApis(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIDeploymentResult[]> {
+async function processApiGatewayApis(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIDeploymentResult[]> {
     const account = await getConfig("account");
     const region = await getConfig("region");
     const globalThrottle: ThrottleSettings | undefined = await getConfig("throttle");
@@ -391,6 +403,15 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
     for(const api of apis) {
         const apiId = api.value!;
         logger.verbose(` * Checking api ${api.name} [${api.value}]...`);
+        if (dryRun) {
+            let path = api.path;
+            if (localStageConfig.mapping.path) {
+                path = localStageConfig.mapping.path + "/" + path;
+            }
+            logger.verbose(`   - WOULD create deployment, update stage '${stage}', and map to ${localStageConfig.mapping.domain}/${path}`);
+            results.push({ name: api.name, deployment: 'created', stage: 'created', mapping: 'created', throttle: 'dry-run', functions: api.functions.length });
+            continue;
+        }
         let deploymentAction: 'created' | 'existing' = 'existing';
         let deployment = await findDeployment(apiId,commit);
         if( !deployment ) {
@@ -477,19 +498,24 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
     return results;
 }
 
-async function processApiGateway(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIResult> {
-    const functions = await processApiGatewayFunctions(stage,appAlias,commit,apiFilter);
-    const apis = await processApiGatewayApis(stage,appAlias,commit,apiFilter);
+async function processApiGateway(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIResult> {
+    const functions = await processApiGatewayFunctions(stage,appAlias,commit,apiFilter,dryRun);
+    const apis = await processApiGatewayApis(stage,appAlias,commit,apiFilter,dryRun);
     return { functions, apis };
 }
 
-async function processSNSFunctions(stage: string, appAlias: string, commit: string): Promise<SNSFunctionResult[]> {
+async function processSNSFunctions(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SNSFunctionResult[]> {
     const functions =  await getLambdaExports('sns');
     const results: SNSFunctionResult[] = [];
     logger.verbose(`\nCreating versions and aliases for functions:`);
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
         const functionName = f.value!;
+        if (dryRun) {
+            logger.verbose(`   - WOULD create version and alias '${appAlias}' for function '${functionName}'`);
+            results.push({ name: functionName, action: 'created', version: '(dry-run)' });
+            continue;
+        }
         let version = await findVersion(functionName,commit);
         let alias = await findAlias(functionName,appAlias);
         if( alias ) {
@@ -514,7 +540,7 @@ async function processSNSFunctions(stage: string, appAlias: string, commit: stri
     return results;
 }
 
-async function processSNSSubscriptions(stage: string, appAlias: string, commit: string): Promise<SNSSubscriptionResult[]> {
+async function processSNSSubscriptions(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SNSSubscriptionResult[]> {
     const account = await getConfig("account");
     const region = await getConfig("region");
     const topics = await getExportsByType('sns');
@@ -529,6 +555,14 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
                 results.push({ name: topic.name, action: 'skipped' });
                 continue;
             }
+        }
+
+        if (dryRun) {
+            for (const f of topic.functions) {
+                logger.verbose(`   - WOULD subscribe '${f.value}' to SNS topic '${topic.name}'`);
+            }
+            results.push({ name: topic.name, action: 'subscribed', oldRemoved: 0 });
+            continue;
         }
 
         let oldRemoved = 0;
@@ -557,18 +591,18 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
     return results;
 }
 
-async function processSNS(stage: string, appAlias: string, commit: string): Promise<SNSResult | null> {
+async function processSNS(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SNSResult | null> {
     const topics = await getExportsByType('sns');
     if (topics.length === 0) {
         return null;
     }
     logger.verbose(`\nUpdating sns topics:`);
-    const functions = await processSNSFunctions(stage,appAlias,commit);
-    const subscriptions = await processSNSSubscriptions(stage,appAlias,commit);
+    const functions = await processSNSFunctions(stage,appAlias,commit,dryRun);
+    const subscriptions = await processSNSSubscriptions(stage,appAlias,commit,dryRun);
     return { functions, subscriptions };
 }
 
-async function processTwilio(stage: string): Promise<TwilioDeployResult | null> {
+async function processTwilio(stage: string, dryRun: boolean = false): Promise<TwilioDeployResult | null> {
     if (!stageConfig || !stageConfig.twilio) {
         return null;
     }
@@ -607,6 +641,12 @@ async function processTwilio(stage: string): Promise<TwilioDeployResult | null> 
         }
     }
     const isMessagingService = twilio.isMessagingServiceSid(sid);
+
+    if (dryRun) {
+        const type = isMessagingService ? 'messaging service' : 'phone number';
+        logger.verbose(`   - WOULD update Twilio ${type} ${sid} webhook to ${webhookUrl}`);
+        return { messagingSid: sid, webhookUrl, action: 'updated' as const };
+    }
 
     if (isMessagingService) {
         logger.verbose(`\n * Updating Twilio messaging service webhook:`);

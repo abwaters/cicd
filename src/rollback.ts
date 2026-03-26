@@ -89,20 +89,24 @@ async function main(): Promise<void> {
     // Determine scope
     const scope = resolveScope(o);
     const { processEnv, processApi, processSns, processTwilio, apiFilter } = scope;
+    const dryRun = !!o.dryRun;
 
     // Display confirmation
     if (!o.noHeader) printHeader();
-    console.log(`Rollback Summary:`);
+    const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
+    console.log(`Rollback Summary${dryRunLabel}:`);
     console.log(`  Stage:    ${stage}`);
     console.log(`  Current:  ${current.ref}  (deployed ${current.createdAt})`);
     console.log(`  Target:   ${target.ref}  (deployed ${target.createdAt})`);
     console.log(`  Scope:    ${scopeLabel(scope)}`);
     console.log();
 
-    const answer = await prompt(`Proceed with rollback? (y/N) `);
-    if (answer !== 'y' && answer !== 'yes') {
-        console.log('Rollback aborted.');
-        process.exit(0);
+    if (!dryRun) {
+        const answer = await prompt(`Proceed with rollback? (y/N) `);
+        if (answer !== 'y' && answer !== 'yes') {
+            console.log('Rollback aborted.');
+            process.exit(0);
+        }
     }
 
     // Execute rollback
@@ -111,13 +115,15 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
 
     console.time("rollback");
-    console.log(`\nRolling back to commit '${commit}' on '${stage}' stage [${computeMode}]...`);
+    console.log(`\nRolling back to commit '${commit}' on '${stage}' stage [${computeMode}]${dryRunLabel}...`);
 
-    // Create GitHub deployment for the rollback
+    // Create GitHub deployment for the rollback (skip in dry-run)
     let ghDeployment: any = null;
-    ghDeployment = github.createDeployment(repo, commit, stage, `Rollback ${appAlias} on ${stage}`);
-    if (ghDeployment) {
-        github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Rolling back to ${appAlias}`);
+    if (!dryRun) {
+        ghDeployment = github.createDeployment(repo, commit, stage, `Rollback ${appAlias} on ${stage}`);
+        if (ghDeployment) {
+            github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Rolling back to ${appAlias}`);
+        }
     }
 
     if (computeMode === 'fargate') {
@@ -162,19 +168,19 @@ async function main(): Promise<void> {
 
     try {
         if (processEnv) {
-            envResults = await cicd.processFunctionEnvironmentVars();
+            envResults = await cicd.processFunctionEnvironmentVars(dryRun);
         }
 
         if (processApi) {
-            apiResults = await cicd.processApiGateway(stage, appAlias, commit, apiFilter);
+            apiResults = await cicd.processApiGateway(stage, appAlias, commit, apiFilter, dryRun);
         }
 
         if (processSns) {
-            snsResults = await cicd.processSNS(stage, appAlias, commit);
+            snsResults = await cicd.processSNS(stage, appAlias, commit, dryRun);
         }
 
         if (processTwilio) {
-            twilioResult = await cicd.processTwilio(stage);
+            twilioResult = await cicd.processTwilio(stage, dryRun);
         }
     } catch (err: any) {
         if (ghDeployment) {

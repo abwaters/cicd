@@ -28,6 +28,7 @@ async function main(): Promise<void> {
     }
 
     const { processEnv, processApi, processSns, processTwilio, apiFilter } = resolveScope(o);
+    const dryRun = !!o.dryRun;
 
     // TODO: formalize the cicd initialization...
     const stage = args[0];
@@ -42,11 +43,12 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
     const repo = await cicd.getConfig("repo");
 
-    console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]...`);
+    const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
+    console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]${dryRunLabel}...`);
 
-    // Create GitHub deployment if repo is configured
+    // Create GitHub deployment if repo is configured (skip in dry-run)
     let ghDeployment: any = null;
-    if (repo) {
+    if (repo && !dryRun) {
         ghDeployment = github.createDeployment(repo, commit, stage, `Deploy ${appAlias} to ${stage}`);
         if (ghDeployment) {
             github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Deploying ${appAlias}`);
@@ -95,19 +97,19 @@ async function main(): Promise<void> {
 
     try {
         if( processEnv ) {
-            envResults = await cicd.processFunctionEnvironmentVars();
+            envResults = await cicd.processFunctionEnvironmentVars(dryRun);
         }
 
         if( processApi ) {
-            apiResults = await cicd.processApiGateway(stage,appAlias,commit,apiFilter);
+            apiResults = await cicd.processApiGateway(stage,appAlias,commit,apiFilter,dryRun);
         }
 
         if( processSns ) {
-            snsResults = await cicd.processSNS(stage,appAlias,commit);
+            snsResults = await cicd.processSNS(stage,appAlias,commit,dryRun);
         }
 
         if( processTwilio ) {
-            twilioResult = await cicd.processTwilio(stage);
+            twilioResult = await cicd.processTwilio(stage,dryRun);
         }
     } catch (err: any) {
         // Update GitHub deployment status to failure
