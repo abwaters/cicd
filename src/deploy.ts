@@ -1,5 +1,6 @@
 import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
+import { resolveScope } from './shared/scope';
 
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
@@ -26,34 +27,7 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    let processEnv = false;
-    let processApi: boolean = true;
-    let processSns: boolean = true ;
-    let processTwilioFlag = true;
-    if( o.env ) {
-        processEnv = true;
-        processApi = false;
-        processSns = false;
-        processTwilioFlag = false;
-    }else if( o.api || o.sns ) {
-        processApi = processSns = false;
-        processApi = !!o.api;
-        processSns = !!o.sns;
-        processTwilioFlag = false;
-    }
-
-    if( o.noTwilio ) {
-        processTwilioFlag = false;
-    }
-
-    if( processApi || processSns ) {
-        processEnv = true;
-    }
-
-    let apiFilter = '';
-    if( o.apiFilter ) {
-        apiFilter = o.apiFilter as string;
-    }
+    const { processEnv, processApi, processSns, processTwilio, apiFilter } = resolveScope(o);
 
     // TODO: formalize the cicd initialization...
     const stage = args[0];
@@ -132,7 +106,7 @@ async function main(): Promise<void> {
             snsResults = await cicd.processSNS(stage,appAlias,commit);
         }
 
-        if( processTwilioFlag ) {
+        if( processTwilio ) {
             twilioResult = await cicd.processTwilio(stage);
         }
     } catch (err: any) {

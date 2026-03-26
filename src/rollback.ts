@@ -1,5 +1,6 @@
 import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
+import { resolveScope, scopeLabel } from './shared/scope';
 
 const cicd = require('./shared/cicd');
 const options = require("./shared/options");
@@ -86,46 +87,8 @@ async function main(): Promise<void> {
     }
 
     // Determine scope
-    let processEnv = false;
-    let processApi = true;
-    let processSns = true;
-    let processTwilioFlag = true;
-
-    if (o.env) {
-        processEnv = true;
-        processApi = false;
-        processSns = false;
-        processTwilioFlag = false;
-    } else if (o.api || o.sns) {
-        processApi = processSns = false;
-        processApi = !!o.api;
-        processSns = !!o.sns;
-        processTwilioFlag = false;
-    }
-
-    if (o.noTwilio) {
-        processTwilioFlag = false;
-    }
-
-    if (processApi || processSns) {
-        processEnv = true;
-    }
-
-    let apiFilter = '';
-    if (o.apiFilter) {
-        apiFilter = o.apiFilter as string;
-    }
-
-    // Build scope label
-    const scopeParts: string[] = [];
-    if (processEnv && !processApi && !processSns) scopeParts.push('Environment only');
-    else {
-        if (processApi) scopeParts.push(apiFilter ? `API (${apiFilter})` : 'API');
-        if (processSns) scopeParts.push('SNS');
-        if (processTwilioFlag) scopeParts.push('Twilio');
-        if (scopeParts.length === 0) scopeParts.push('Environment only');
-        else scopeParts.unshift('Environment');
-    }
+    const scope = resolveScope(o);
+    const { processEnv, processApi, processSns, processTwilio, apiFilter } = scope;
 
     // Display confirmation
     if (!o.noHeader) printHeader();
@@ -133,7 +96,7 @@ async function main(): Promise<void> {
     console.log(`  Stage:    ${stage}`);
     console.log(`  Current:  ${current.ref}  (deployed ${current.createdAt})`);
     console.log(`  Target:   ${target.ref}  (deployed ${target.createdAt})`);
-    console.log(`  Scope:    ${scopeParts.join(' + ')}`);
+    console.log(`  Scope:    ${scopeLabel(scope)}`);
     console.log();
 
     const answer = await prompt(`Proceed with rollback? (y/N) `);
@@ -210,7 +173,7 @@ async function main(): Promise<void> {
             snsResults = await cicd.processSNS(stage, appAlias, commit);
         }
 
-        if (processTwilioFlag) {
+        if (processTwilio) {
             twilioResult = await cicd.processTwilio(stage);
         }
     } catch (err: any) {
