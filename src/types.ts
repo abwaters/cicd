@@ -309,3 +309,10 @@ export interface CleanFunctionResult {
     versionsRemoved: number;
     activeCount: number;
 }
+
+export interface CleanEcrResult {
+    repositoryName: string;
+    deleted: number;
+    failures: number;
+    activeCount: number;
+}
