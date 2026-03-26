@@ -43,6 +43,13 @@ export interface FunctionConfig {
     value?: string; // resolved at runtime
 }
 
+export interface SNSFunctionConfig {
+    name: string;
+    env?: string;
+    concurrency?: number;
+    value?: string; // resolved at runtime
+}
+
 export interface StageConfig {
     stage: string;
     mapping: StageMapping;
