@@ -1,12 +1,11 @@
-const { execSync } = require('child_process');
+import { execSync } from 'child_process';
+import { GitHubDeployment } from '../types';
+
 const logger = require('./logger');
 
-let ghAvailable = null;
+let ghAvailable: boolean | null = null;
 
-/**
- * Check if the gh CLI is installed and available
- */
-function isGhAvailable() {
+function isGhAvailable(): boolean {
     if (ghAvailable !== null) return ghAvailable;
     try {
         execSync('gh --version', { stdio: 'ignore' });
@@ -17,10 +16,7 @@ function isGhAvailable() {
     return ghAvailable;
 }
 
-/**
- * Run a gh api command and return parsed JSON
- */
-function ghApi(method, path, body) {
+function ghApi(method: string, path: string, body?: Record<string, string | boolean | number>): any {
     const args = ['gh', 'api', '-X', method, path, '-H', 'Accept: application/vnd.github+json'];
     if (body) {
         for (const [key, value] of Object.entries(body)) {
@@ -38,22 +34,13 @@ function ghApi(method, path, body) {
     return JSON.parse(result);
 }
 
-/**
- * Create a GitHub deployment
- * @param {string} repo - owner/repo format
- * @param {string} ref - git ref (commit SHA)
- * @param {string} environment - deployment environment name (e.g., staging, prod)
- * @param {string} description - deployment description
- * @returns {object|null} deployment object with id, or null if skipped
- */
-function createDeployment(repo, ref, environment, description) {
+function createDeployment(repo: string, ref: string, environment: string, description: string): { id: number } | null {
     if (!isGhAvailable()) {
         logger.verbose(`   - gh CLI not installed, skipping GitHub deployment tracking`);
         return null;
     }
 
     try {
-        // Use --input with JSON body because required_contexts must be an empty array
         const body = JSON.stringify({
             ref,
             environment,
@@ -67,21 +54,13 @@ function createDeployment(repo, ref, environment, description) {
         const deployment = JSON.parse(result);
         logger.verbose(`   - created GitHub deployment #${deployment.id} for ${environment}`);
         return deployment;
-    } catch (e) {
+    } catch (e: any) {
         logger.verbose(`   - failed to create GitHub deployment: ${e.message}`);
         return null;
     }
 }
 
-/**
- * Update a GitHub deployment status
- * @param {string} repo - owner/repo format
- * @param {number} deploymentId - deployment ID
- * @param {string} state - status state (in_progress, success, failure, error)
- * @param {string} description - status description
- * @returns {object|null} status object, or null if skipped
- */
-function updateDeploymentStatus(repo, deploymentId, state, description) {
+function updateDeploymentStatus(repo: string, deploymentId: number, state: string, description: string): any | null {
     if (!isGhAvailable()) {
         return null;
     }
@@ -93,20 +72,13 @@ function updateDeploymentStatus(repo, deploymentId, state, description) {
         });
         logger.verbose(`   - deployment #${deploymentId} status: ${state}`);
         return result;
-    } catch (e) {
+    } catch (e: any) {
         logger.verbose(`   - failed to update deployment status: ${e.message}`);
         return null;
     }
 }
 
-/**
- * List recent deployments for an environment
- * @param {string} repo - owner/repo format
- * @param {string} environment - environment name
- * @param {number} count - number of deployments to return (default 5)
- * @returns {Array} array of deployment objects with status info
- */
-function listDeployments(repo, environment, count = 5) {
+function listDeployments(repo: string, environment: string, count: number = 5): GitHubDeployment[] {
     if (!isGhAvailable()) {
         logger.verbose(`   - gh CLI not installed, skipping GitHub deployment history`);
         return [];
@@ -114,7 +86,7 @@ function listDeployments(repo, environment, count = 5) {
 
     try {
         const deployments = ghApi('GET', `/repos/${repo}/deployments?environment=${environment}&per_page=${count}`);
-        const results = [];
+        const results: GitHubDeployment[] = [];
         for (const d of deployments) {
             let status = 'unknown';
             let statusDesc = '';
@@ -138,7 +110,7 @@ function listDeployments(repo, environment, count = 5) {
             });
         }
         return results;
-    } catch (e) {
+    } catch (e: any) {
         logger.verbose(`   - failed to list GitHub deployments: ${e.message}`);
         return [];
     }
