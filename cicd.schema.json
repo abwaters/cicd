@@ -281,6 +281,11 @@
             "type": "string",
             "description": "ECS task definition family name for this stage (required in fargate mode)",
             "minLength": 1
+          },
+          "httpApi": {
+            "type": "string",
+            "description": "HTTP API ID or !ImportValue reference for API Gateway V2 custom domain mapping (required in fargate mode)",
+            "minLength": 1
           }
         },
         "additionalProperties": false
