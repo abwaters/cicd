@@ -6,6 +6,8 @@ import {
     UpdateServiceCommand,
     ListTaskDefinitionsCommand,
     DeregisterTaskDefinitionCommand,
+    ListTasksCommand,
+    DescribeTasksCommand,
     TaskDefinition,
     ContainerDefinition,
     RegisterTaskDefinitionCommandInput
@@ -108,7 +110,56 @@ async function forceUpdateService(cluster: string, service: string): Promise<voi
     await awsRetry(() => ecsClient.send(command));
 }
 
-async function waitForServicesStable(cluster: string, service: string): Promise<boolean> {
+export interface StabilityResult {
+    stable: boolean;
+    failed: boolean;
+    failureReason?: string;
+    stoppedTaskReasons?: string[];
+}
+
+async function getStoppedTaskReasons(cluster: string, service: string): Promise<string[]> {
+    const ecsClient = await getClient();
+    const reasons: string[] = [];
+
+    try {
+        const listCommand = new ListTasksCommand({
+            cluster,
+            serviceName: service,
+            desiredStatus: 'STOPPED'
+        });
+        const listResponse = await awsRetry(() => ecsClient.send(listCommand));
+        const taskArns = listResponse.taskArns || [];
+
+        if (taskArns.length === 0) return reasons;
+
+        // Only check the most recent few stopped tasks
+        const recentArns = taskArns.slice(-3);
+        const describeCommand = new DescribeTasksCommand({
+            cluster,
+            tasks: recentArns
+        });
+        const describeResponse = await awsRetry(() => ecsClient.send(describeCommand));
+
+        for (const task of (describeResponse.tasks || [])) {
+            const containers = task.containers || [];
+            for (const container of containers) {
+                if (container.exitCode && container.exitCode !== 0) {
+                    const reason = container.reason || task.stoppedReason || `exit code ${container.exitCode}`;
+                    reasons.push(`${container.name}: ${reason} (exit code ${container.exitCode})`);
+                }
+            }
+            if (reasons.length === 0 && task.stoppedReason) {
+                reasons.push(task.stoppedReason);
+            }
+        }
+    } catch {
+        // Non-critical - don't fail the whole flow if we can't get stopped task reasons
+    }
+
+    return [...new Set(reasons)]; // deduplicate
+}
+
+async function waitForServicesStable(cluster: string, service: string): Promise<StabilityResult> {
     const ecsClient = await getClient();
     const maxWaitTime = 600;
     const pollInterval = 15;
@@ -135,24 +186,33 @@ async function waitForServicesStable(cluster: string, service: string): Promise<
             logger.verbose(`   - [${formatDuration(elapsed)}] primary: ${primary.runningCount}/${primary.desiredCount} running, ${primary.rolloutState || 'unknown'}, ${activeDeployments.length} draining`);
         }
 
-        // Consider stable when primary deployment has desired count running
-        // and its rollout is COMPLETED (don't wait for old deployments to fully drain)
+        // Detect failed rollout early
+        if (primary && primary.rolloutState === 'FAILED') {
+            const failureReason = primary.rolloutStateReason || 'Deployment failed';
+            logger.verbose(`   - FAILED: ${failureReason}`);
+            const stoppedReasons = await getStoppedTaskReasons(cluster, service);
+            return { stable: false, failed: true, failureReason, stoppedTaskReasons: stoppedReasons };
+        }
+
+        // Consider stable when primary deployment rollout is COMPLETED
         if (primary && primary.rolloutState === 'COMPLETED') {
-            return true;
+            return { stable: true, failed: false };
         }
 
         // Also accept: single deployment with running == desired (older ECS behavior)
         if (svc.deployments?.length === 1 && primary &&
             primary.runningCount === primary.desiredCount &&
             (primary.desiredCount || 0) > 0) {
-            return true;
+            return { stable: true, failed: false };
         }
 
         await new Promise(r => setTimeout(r, pollInterval * 1000));
     }
 
+    // Timed out - check for stopped tasks to give a useful reason
     logger.verbose(`   - timed out after ${formatDuration(maxWaitTime)}`);
-    return false;
+    const stoppedReasons = await getStoppedTaskReasons(cluster, service);
+    return { stable: false, failed: false, failureReason: 'Timed out waiting for stability', stoppedTaskReasons: stoppedReasons };
 }
 
 async function listTaskDefinitionRevisions(family: string): Promise<string[]> {
@@ -189,6 +249,7 @@ export {
     updateService,
     forceUpdateService,
     waitForServicesStable,
+    getStoppedTaskReasons,
     listTaskDefinitionRevisions,
     deregisterTaskDefinition
 };
