@@ -59,6 +59,7 @@ export interface StageConfig {
     twilio?: TwilioStageConfig;
     service?: string;
     taskFamily?: string;
+    httpApi?: string;
 }
 
 export interface StageMapping {

@@ -772,14 +772,20 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
     }
 
     // 8. Ensure HTTP API custom domain mapping
-    if (fargateConfig.httpApi && localStageConfig.mapping) {
+    // httpApi can be defined at stage level (per-stage APIs) or top-level fargate config (shared API)
+    let httpApi = fargateConfig.httpApi;
+    if (localStageConfig.httpApi) {
+        httpApi = (await resolveVariable(localStageConfig.httpApi)) || localStageConfig.httpApi;
+    }
+
+    if (httpApi && localStageConfig.mapping) {
         const domain = localStageConfig.mapping.domain;
         const path = localStageConfig.mapping.path;
         logger.verbose(`\n * Checking HTTP API mapping for ${domain} with path '${path}':`);
 
         const existingMappings = await apigw.listApiMappingsV2(domain);
         const existing = existingMappings.find((m: any) =>
-            m.ApiId === fargateConfig.httpApi && (m.ApiMappingKey || '') === (path || '')
+            m.ApiId === httpApi && (m.ApiMappingKey || '') === (path || '')
         );
 
         if (existing) {
@@ -787,7 +793,7 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
         } else {
             logger.verbose(`   - creating mapping for ${domain} with path '${path}'`);
             try {
-                await apigw.createCustomDomainMappingV2(domain, fargateConfig.httpApi, '$default', path);
+                await apigw.createCustomDomainMappingV2(domain, httpApi!, '$default', path);
                 logger.verbose(`   - mapping created`);
             } catch (e: any) {
                 logger.verbose(`   x mapping creation failed: ${e.message}`);
