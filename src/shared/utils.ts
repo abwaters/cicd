@@ -73,4 +73,4 @@ async function awsRetry<T>(operation: () => Promise<T>, maxRetries?: number): Pr
     throw new Error('Max retries exceeded');
 }
 
-module.exports = {sleep, awsRetry, isThrottleError};
+export { sleep, awsRetry, isThrottleError };

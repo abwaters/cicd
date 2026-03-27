@@ -1,15 +1,15 @@
 import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult, CleanEcrResult } from './types';
 
-const sns = require('./shared/sns');
-const lambda = require('./shared/lambda');
-const apigw = require('./shared/apigw');
-const ecs = require('./shared/ecs');
-const ecr = require('./shared/ecr');
-const cicd = require('./shared/cicd');
-const credentials = require('./shared/credentials');
-const options = require('./shared/options');
-const logger = require('./shared/logger');
-const { printHeader } = require('./shared/header');
+import * as sns from './shared/sns';
+import * as lambda from './shared/lambda';
+import * as apigw from './shared/apigw';
+import * as ecs from './shared/ecs';
+import * as ecr from './shared/ecr';
+import * as cicd from './shared/cicd';
+import * as credentials from './shared/credentials';
+import * as options from './shared/options';
+import * as logger from './shared/logger';
+import { printHeader } from './shared/header';
 
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
@@ -155,22 +155,22 @@ async function main(): Promise<void> {
         const stages = await apigw.listStages(apiId);
         const activeDeployments = new Map<string, string[]>();
         for(const s of stages) {
-            const commit = s.variables.Commit;
+            const commit = s.variables!.Commit;
             activeCommits.set(commit, true);
 
             // Track commit -> stages mapping
             if (!commitStages.has(commit)) {
                 commitStages.set(commit, []);
             }
-            if (!commitStages.get(commit)!.includes(s.stageName)) {
-                commitStages.get(commit)!.push(s.stageName);
+            if (!commitStages.get(commit)!.includes(s.stageName!)) {
+                commitStages.get(commit)!.push(s.stageName!);
             }
 
             // Accumulate stage names per deployment (fixes bug where second stage replaced first)
-            if (!activeDeployments.has(s.deploymentId)) {
-                activeDeployments.set(s.deploymentId, [s.stageName]);
+            if (!activeDeployments.has(s.deploymentId!)) {
+                activeDeployments.set(s.deploymentId!, [s.stageName!]);
             } else {
-                activeDeployments.get(s.deploymentId)!.push(s.stageName);
+                activeDeployments.get(s.deploymentId!)!.push(s.stageName!);
             }
         }
 
@@ -179,13 +179,13 @@ async function main(): Promise<void> {
         let activeCount = 0;
         const activeStageLabels: string[] = [];
         for(const d of deployments) {
-            if (!activeDeployments.has(d.id)) {
+            if (!activeDeployments.has(d.id!)) {
                 logger.verbose(`   - Deployment '${d.id}' deleted from ${api.name}`);
-                await apigw.deleteDeployment(apiId, d.id);
+                await apigw.deleteDeployment(apiId, d.id!);
                 deletedDeployments++;
                 removed++;
             } else {
-                const stageNames = activeDeployments.get(d.id)!;
+                const stageNames = activeDeployments.get(d.id!)!;
                 logger.verbose(`   - Deployment '${d.id}' active (${stageNames.join(', ')})`);
                 activeCount++;
                 activeStageLabels.push(stageNames.sort().join('/'));
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
     // ── Phase 2: Scan SNS topics ──────────────────────────────────────
     const topicResults: CleanTopicResult[] = [];
     for(const topic of topics) {
-        const subscriptions = await sns.listSubscriptionsByTopic(topic.value);
+        const subscriptions = await sns.listSubscriptionsByTopic(topic.value!);
         let topicCommit: string | null = null;
         for(const subscription of subscriptions) {
             const f = await lambda.describeFunction(subscription.endpoint);

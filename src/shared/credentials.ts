@@ -1,6 +1,6 @@
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 
-const { getConfig } = require('./config');
+import { getConfig } from './config';
 
 async function validateCredentials(): Promise<boolean> {
     try {
@@ -53,4 +53,4 @@ async function validateCredentials(): Promise<boolean> {
     return false;
 }
 
-module.exports = { validateCredentials };
+export { validateCredentials };

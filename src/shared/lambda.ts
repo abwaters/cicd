@@ -18,8 +18,8 @@ import {
 import * as crypto from 'crypto';
 import { VersionInfo, VersionListItem, AliasInfo } from '../types';
 
-const { getConfig } = require('./config');
-const { awsRetry } = require('./utils');
+import { getConfig } from './config';
+import { awsRetry } from './utils';
 
 let client: LambdaClient | null = null;
 
@@ -222,7 +222,7 @@ async function updateEnvironmentVariables(functionName: string, envVars: Record<
     }
 }
 
-module.exports = {
+export {
     deleteVersion,
     deleteAlias,
     listAliases,
@@ -233,4 +233,5 @@ module.exports = {
     createAlias,
     addFunctionPermission,
     updateProvisionedConcurrency,
-    updateEnvironmentVariables};
+    updateEnvironmentVariables
+};

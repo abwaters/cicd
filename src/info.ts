@@ -11,16 +11,17 @@ import {
     GitHubDeployment
 } from './types';
 
-const options = require('./shared/options');
-const cicd = require('./shared/cicd');
-const lambda = require('./shared/lambda');
-const apigw = require('./shared/apigw');
-const sns = require('./shared/sns');
-const twilio = require('./shared/twilio');
-const credentials = require('./shared/credentials');
-const logger = require('./shared/logger');
-const github = require('./shared/github');
-const { printHeader } = require('./shared/header');
+import * as options from './shared/options';
+import * as cicd from './shared/cicd';
+import * as lambda from './shared/lambda';
+import * as apigw from './shared/apigw';
+import * as sns from './shared/sns';
+import * as twilio from './shared/twilio';
+import * as credentials from './shared/credentials';
+import * as logger from './shared/logger';
+import * as github from './shared/github';
+import * as ecs from './shared/ecs';
+import { printHeader } from './shared/header';
 
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
@@ -46,7 +47,6 @@ async function main(): Promise<void> {
 
     if (computeMode === 'fargate') {
         // ── Fargate info flow ────────────────────────────────────────
-        const ecs = require('./shared/ecs');
         const fargateConfig = await cicd.resolveFargateConfig();
 
         console.log(`Collecting Fargate service information...`);
@@ -132,12 +132,12 @@ async function main(): Promise<void> {
         const apistages = await apigw.listStages(apiId);
         for(const s of apistages) {
             const name = api.name;
-            const stagename = s.stageName;
-            const commit = s.variables.Commit;
+            const stagename = s.stageName!;
+            const commit = s.variables!.Commit;
             const apiInfo = {
                 name,
                 stage: stagename,
-                commit: s.variables.Commit,
+                commit: s.variables!.Commit,
                 functions: [] as any[]
             };
             if( !stagesInfo[stagename].commits.hasOwnProperty(commit) ) {
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     // Collect SNS topic results
     const topicResults: InfoTopicResult[] = [];
     for(const topic of topics) {
-        const subs = await sns.listSubscriptionsByTopic(topic.value);
+        const subs = await sns.listSubscriptionsByTopic(topic.value!);
         let commit = '';
         for(const sub of subs) {
             if( sub.protocol === 'lambda' ) {

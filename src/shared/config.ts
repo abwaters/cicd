@@ -15,4 +15,4 @@ async function getConfig<T extends keyof CICDConfig>(key: T): Promise<CICDConfig
     return rawConfig![key];
 }
 
-module.exports = {initConfig,getConfig};
+export { initConfig, getConfig };
