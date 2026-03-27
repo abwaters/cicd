@@ -12,7 +12,7 @@ import {
 } from "@aws-sdk/client-ecs";
 
 import { getConfig } from './config';
-import { awsRetry } from './utils';
+import { awsRetry, formatDuration } from './utils';
 import * as logger from './logger';
 
 let client: ECSClient | null = null;
@@ -132,7 +132,7 @@ async function waitForServicesStable(cluster: string, service: string): Promise<
         const elapsed = Math.round((Date.now() - startTime) / 1000);
 
         if (primary) {
-            logger.verbose(`   - [${elapsed}s] primary: ${primary.runningCount}/${primary.desiredCount} running, ${primary.rolloutState || 'unknown'}, ${activeDeployments.length} draining`);
+            logger.verbose(`   - [${formatDuration(elapsed)}] primary: ${primary.runningCount}/${primary.desiredCount} running, ${primary.rolloutState || 'unknown'}, ${activeDeployments.length} draining`);
         }
 
         // Consider stable when primary deployment has desired count running
@@ -151,7 +151,7 @@ async function waitForServicesStable(cluster: string, service: string): Promise<
         await new Promise(r => setTimeout(r, pollInterval * 1000));
     }
 
-    logger.verbose(`   - timed out after ${maxWaitTime}s`);
+    logger.verbose(`   - timed out after ${formatDuration(maxWaitTime)}`);
     return false;
 }
 
