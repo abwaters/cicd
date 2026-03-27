@@ -22,8 +22,8 @@ import {
 } from "@aws-sdk/client-apigatewayv2";
 import { ThrottleSettings, DeploymentInfo } from '../types';
 
-const config = require('./config');
-const { awsRetry } = require('./utils');
+import * as config from './config';
+import { awsRetry } from './utils';
 
 let client: APIGatewayClient | null = null;
 let clientv2: ApiGatewayV2Client | null = null;
@@ -262,4 +262,4 @@ async function deleteDeployment(apiId: string, deploymentId: string): Promise<vo
     }
 }
 
-module.exports = {createDeployment, createStage, deleteDeployment, createCustomDomainMapping, createCustomDomainMappingV2, listApiMappingsV2, listDeployments, listStages, updateStage, listBasePathMappings};
+export { createDeployment, createStage, deleteDeployment, createCustomDomainMapping, createCustomDomainMappingV2, listApiMappingsV2, listDeployments, listStages, updateStage, listBasePathMappings };

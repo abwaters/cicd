@@ -75,6 +75,18 @@
         "type": "string"
       }
     },
+    "environmentGroups": {
+      "type": "object",
+      "description": "Named groups of environment variable names. Functions can reference groups with @groupName in their env field (e.g., '@twilio,DDB_TABLE')",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$"
+        },
+        "minItems": 1
+      }
+    },
     "throttle": {
       "type": "object",
       "description": "Global default API Gateway throttle settings for all stages and APIs (can be overridden at stage or API level)",
@@ -144,7 +156,7 @@
                 "description": "Lambda functions to integrate with this API",
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/definitions/functionConfig"
+                  "$ref": "#/definitions/apiFunctionConfig"
                 }
               }
             },
@@ -176,7 +188,7 @@
                 "description": "Lambda functions to subscribe to this topic",
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/definitions/functionConfig"
+                  "$ref": "#/definitions/snsFunctionConfig"
                 }
               }
             },
@@ -277,9 +289,9 @@
   },
   "additionalProperties": false,
   "definitions": {
-    "functionConfig": {
+    "apiFunctionConfig": {
       "type": "object",
-      "description": "Lambda function configuration",
+      "description": "API Gateway Lambda function configuration (requires HTTP method)",
       "required": ["name", "method"],
       "properties": {
         "name": {
@@ -289,13 +301,41 @@
         },
         "method": {
           "type": "string",
-          "description": "HTTP method for API integration (GET, POST, PUT, DELETE, etc.)",
+          "description": "HTTP method for API integration",
           "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
         },
         "env": {
           "type": "string",
           "description": "Comma-separated list of environment variable names from global or stage environment",
-          "pattern": "^[A-Z_][A-Z0-9_]*(,[A-Z_][A-Z0-9_]*)*$"
+          "pattern": "^(@?[A-Za-z_][A-Za-z0-9_]*)(,@?[A-Za-z_][A-Za-z0-9_]*)*$"
+        },
+        "concurrency": {
+          "type": "integer",
+          "description": "Reserved concurrent executions for this Lambda function (0 for throttling)",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "snsFunctionConfig": {
+      "type": "object",
+      "description": "SNS topic Lambda function configuration (method is accepted but not used)",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "CloudFormation export name for the Lambda function ARN",
+          "minLength": 1
+        },
+        "method": {
+          "type": "string",
+          "description": "Accepted for backwards compatibility but not used for SNS functions",
+          "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+        },
+        "env": {
+          "type": "string",
+          "description": "Comma-separated list of environment variable names from global or stage environment",
+          "pattern": "^(@?[A-Za-z_][A-Za-z0-9_]*)(,@?[A-Za-z_][A-Za-z0-9_]*)*$"
         },
         "concurrency": {
           "type": "integer",

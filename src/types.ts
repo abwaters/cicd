@@ -8,6 +8,7 @@ export interface CICDConfig {
     computeMode?: 'lambda' | 'fargate';
     fargate?: FargateConfig;
     environment?: Record<string, string>;
+    environmentGroups?: Record<string, string[]>;
     throttle?: ThrottleSettings;
     exports: ExportConfig[];
     stages: StageConfig[];
@@ -38,6 +39,13 @@ export interface ExportConfig {
 export interface FunctionConfig {
     name: string;
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
+    env?: string;
+    concurrency?: number;
+    value?: string; // resolved at runtime
+}
+
+export interface SNSFunctionConfig {
+    name: string;
     env?: string;
     concurrency?: number;
     value?: string; // resolved at runtime

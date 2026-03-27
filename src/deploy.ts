@@ -1,11 +1,14 @@
 import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResult } from './types';
+import { printDeploymentSummary } from './shared/summary';
+import { resolveScope } from './shared/scope';
 
-const cicd = require('./shared/cicd');
-const options = require("./shared/options");
-const credentials = require('./shared/credentials');
-const logger = require('./shared/logger');
-const github = require('./shared/github');
-const { printHeader } = require('./shared/header');
+import * as verify from './shared/verify';
+import * as cicd from './shared/cicd';
+import * as options from './shared/options';
+import * as credentials from './shared/credentials';
+import * as logger from './shared/logger';
+import * as github from './shared/github';
+import { printHeader } from './shared/header';
 
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
@@ -25,34 +28,8 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    let processEnv = false;
-    let processApi: boolean = true;
-    let processSns: boolean = true ;
-    let processTwilioFlag = true;
-    if( o.env ) {
-        processEnv = true;
-        processApi = false;
-        processSns = false;
-        processTwilioFlag = false;
-    }else if( o.api || o.sns ) {
-        processApi = processSns = false;
-        processApi = !!o.api;
-        processSns = !!o.sns;
-        processTwilioFlag = false;
-    }
-
-    if( o.noTwilio ) {
-        processTwilioFlag = false;
-    }
-
-    if( processApi || processSns ) {
-        processEnv = true;
-    }
-
-    let apiFilter = '';
-    if( o.apiFilter ) {
-        apiFilter = o.apiFilter as string;
-    }
+    const { processEnv, processApi, processSns, processTwilio, apiFilter } = resolveScope(o);
+    const dryRun = !!o.dryRun;
 
     // TODO: formalize the cicd initialization...
     const stage = args[0];
@@ -67,11 +44,12 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
     const repo = await cicd.getConfig("repo");
 
-    console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]...`);
+    const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
+    console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]${dryRunLabel}...`);
 
-    // Create GitHub deployment if repo is configured
+    // Create GitHub deployment if repo is configured (skip in dry-run)
     let ghDeployment: any = null;
-    if (repo) {
+    if (repo && !dryRun) {
         ghDeployment = github.createDeployment(repo, commit, stage, `Deploy ${appAlias} to ${stage}`);
         if (ghDeployment) {
             github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Deploying ${appAlias}`);
@@ -120,19 +98,19 @@ async function main(): Promise<void> {
 
     try {
         if( processEnv ) {
-            envResults = await cicd.processFunctionEnvironmentVars();
+            envResults = await cicd.processFunctionEnvironmentVars(dryRun);
         }
 
         if( processApi ) {
-            apiResults = await cicd.processApiGateway(stage,appAlias,commit,apiFilter);
+            apiResults = await cicd.processApiGateway(stage,appAlias,commit,apiFilter,dryRun);
         }
 
         if( processSns ) {
-            snsResults = await cicd.processSNS(stage,appAlias,commit);
+            snsResults = await cicd.processSNS(stage,appAlias,commit,dryRun);
         }
 
-        if( processTwilioFlag ) {
-            twilioResult = await cicd.processTwilio(stage);
+        if( processTwilio ) {
+            twilioResult = await cicd.processTwilio(stage,dryRun);
         }
     } catch (err: any) {
         // Update GitHub deployment status to failure
@@ -144,83 +122,14 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
-    // Environment Variables
-    if (envResults && envResults.length > 0) {
-        console.log(`\nEnvironment Variables:`);
-        for (const r of envResults) {
-            const status = r.updated ? `${r.varCount} vars` : 'skipped';
-            console.log(`  ${r.name.padEnd(40)} ${status}`);
-        }
-    }
-
-    // API Functions
-    if (apiResults && apiResults.functions.length > 0) {
-        console.log(`\nAPI Functions:`);
-        for (const r of apiResults.functions) {
-            const versionLabel = r.version ? `v${r.version}` : '';
-            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
-        }
-    }
-
-    // API Deployments
-    if (apiResults && apiResults.apis.length > 0) {
-        console.log(`\nAPI Deployments:`);
-        for (const r of apiResults.apis) {
-            console.log(`  ${r.name.padEnd(40)} deployment ${r.deployment.padEnd(10)} stage ${r.stage.padEnd(10)} mapping ${r.mapping}`);
-        }
-    }
-
-    // SNS Functions
-    if (snsResults && snsResults.functions.length > 0) {
-        console.log(`\nSNS Functions:`);
-        for (const r of snsResults.functions) {
-            const versionLabel = r.version ? `v${r.version}` : '';
-            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
-        }
-    }
-
-    // SNS Subscriptions
-    if (snsResults && snsResults.subscriptions.length > 0) {
-        console.log(`\nSNS Subscriptions:`);
-        for (const r of snsResults.subscriptions) {
-            if (r.action === 'skipped') {
-                console.log(`  ${r.name.padEnd(40)} skipped`);
-            } else {
-                const oldLabel = r.oldRemoved && r.oldRemoved > 0 ? `  ${r.oldRemoved} old removed` : '';
-                console.log(`  ${r.name.padEnd(40)} subscribed${oldLabel}`);
-            }
-        }
-    }
-
-    // Twilio
-    if (twilioResult) {
-        console.log(`\nTwilio:`);
-        const twilioLabel = twilioResult.messagingSid;
-        console.log(`  ${twilioLabel.padEnd(40)} ${twilioResult.webhookUrl}`);
-    }
-
-    // Summary line
-    const parts: string[] = [];
-    if (envResults) {
-        const updated = envResults.filter(r => r.updated).length;
-        parts.push(`${updated} functions configured`);
-    }
-    if (apiResults) {
-        const created = apiResults.functions.filter(r => r.action === 'created').length;
-        const existing = apiResults.functions.filter(r => r.action === 'exists').length;
-        parts.push(`${apiResults.apis.length} APIs deployed (${created} new, ${existing} existing)`);
-    }
-    if (snsResults) {
-        const subscribed = snsResults.subscriptions.filter(r => r.action === 'subscribed').length;
-        const skipped = snsResults.subscriptions.filter(r => r.action === 'skipped').length;
-        if (subscribed > 0 || skipped > 0) {
-            parts.push(`${subscribed} topics subscribed${skipped > 0 ? `, ${skipped} skipped` : ''}`);
-        }
-    }
-    if (twilioResult) {
-        parts.push(`Twilio webhook ${twilioResult.action}`);
-    }
+    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, twilio: twilioResult });
     console.log(`\nSummary: ${parts.join(', ')}`);
+
+    // Verify deployment (skip in dry-run)
+    if (!dryRun) {
+        const verifyResult = await verify.verifyDeployment(stage, appAlias);
+        verify.printVerificationResult(verifyResult);
+    }
 
     // Update GitHub deployment status to success
     if (repo && ghDeployment) {

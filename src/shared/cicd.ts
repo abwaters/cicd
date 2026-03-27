@@ -14,20 +14,21 @@ import {
     SNSSubscriptionResult,
     SNSResult,
     TwilioDeployResult,
-    VersionInfo
+    VersionInfo,
+    DeploymentInfo
 } from '../types';
 import { Deployment, Stage, BasePathMapping } from '@aws-sdk/client-api-gateway';
 import { ContainerDefinition } from '@aws-sdk/client-ecs';
 
-const lambda = require("./lambda");
-const apigw = require("./apigw");
-const sns = require("./sns");
-const twilio = require("./twilio");
-const ecs = require("./ecs");
-const cf = require('./cloudformation');
-const ps = require('./ps');
-const {getConfig} = require('./config');
-const logger = require('./logger');
+import * as lambda from './lambda';
+import * as apigw from './apigw';
+import * as sns from './sns';
+import * as twilio from './twilio';
+import * as ecs from './ecs';
+import * as cf from './cloudformation';
+import * as ps from './ps';
+import { getConfig } from './config';
+import * as logger from './logger';
 
 const rawExports = new Map<string, string>();
 const exportMap = new Map<string, ExportConfig>();
@@ -55,20 +56,33 @@ async function getVar(key: string): Promise<string> {
         val = envCache!.get(key)!;
     }
     if( !val ) {
-        console.log(`VARIABLE ${key} is empty.`);
-        process.exit(-1);
+        throw new Error(`Environment variable '${key}' resolved to empty value`);
     }
     return val ;
 }
 
-function splitVars(varNames: string): string[] {
-    const names = varNames.split(',');
-    return names.map(n=>n.trim());
+async function expandVarNames(varNames: string): Promise<string[]> {
+    const names = varNames.split(',').map(n => n.trim());
+    const groups: Record<string, string[]> | undefined = await getConfig('environmentGroups');
+    const expanded: string[] = [];
+    for (const name of names) {
+        if (name.startsWith('@')) {
+            const groupName = name.substring(1);
+            if (groups && groups[groupName]) {
+                expanded.push(...groups[groupName]);
+            } else {
+                throw new Error(`Environment group '${groupName}' referenced but not defined in environmentGroups`);
+            }
+        } else {
+            expanded.push(name);
+        }
+    }
+    return expanded;
 }
 
 async function getVars(vars: string | string[] | undefined): Promise<Record<string, string> | null> {
     if( typeof vars === 'string' ) {
-        vars = splitVars(vars);
+        vars = await expandVarNames(vars);
     }
     if( !Array.isArray(vars) ) {
         return null;
@@ -101,7 +115,7 @@ async function resolveVariable(key: string): Promise<string> {
         if( psCache.has(psName) ) {
             val = psCache.get(psName)!;
         } else {
-            val = await ps.getParameterValue(psName, true);
+            val = await ps.getParameterValue(psName, true) ?? '';
             if (val) {
                 val = val.replace(/\\"/g, '"');
                 val = val.replace(/\\\\n/g, "\\n");
@@ -159,15 +173,15 @@ async function initExports(): Promise<void> {
 
         // get exports and load them
         const response = await cf.listExports();
-        for(const e of response) {
-            if( exportMap.has(e.Name) ) {
-                const cfg = exportMap.get(e.Name)!;
+        for(const e of (response || [])) {
+            if( exportMap.has(e.Name!) ) {
+                const cfg = exportMap.get(e.Name!)!;
                 cfg.value = e.Value;
-            }else if( functionMap.has(e.Name) ) {
-                const cfg = functionMap.get(e.Name)!;
+            }else if( functionMap.has(e.Name!) ) {
+                const cfg = functionMap.get(e.Name!)!;
                 cfg.value = e.Value;
             }
-            rawExports.set(e.Name,e.Value);
+            rawExports.set(e.Name!,e.Value!);
         }
 
         // did we miss any exports in the config?
@@ -186,7 +200,7 @@ async function initExports(): Promise<void> {
             }
         }
         if( cnt ) {
-            process.exit(-1);
+            throw new Error(`${cnt} export(s) could not be resolved — see errors above`);
         }
 
         // update values for any items that don't have values
@@ -206,9 +220,7 @@ async function initExports(): Promise<void> {
         }
 
     }catch(e) {
-        console.log(e);
-        console.log(`ERROR: couldn't get exports`);
-        process.exit(-1);
+        throw new Error(`Failed to initialize exports: ${e instanceof Error ? e.message : e}`);
     }
 }
 
@@ -267,7 +279,7 @@ async function findAlias(functionName: string, commit: string): Promise<string> 
 
 async function findTag(functionName: string, commit: string): Promise<boolean> {
     const fc = await lambda.describeFunction(functionName);
-    const tags = await lambda.listFunctionTags(fc.FunctionArn);
+    const tags = await lambda.listFunctionTags(fc!.FunctionArn!);
     if( tags.hasOwnProperty('Commit') ) {
         if( tags.Commit.includes(commit) ) {
             return true;
@@ -276,11 +288,11 @@ async function findTag(functionName: string, commit: string): Promise<boolean> {
     return false;
 }
 
-async function findDeployment(apiId: string, commit: string): Promise<Deployment | null> {
+async function findDeployment(apiId: string, commit: string): Promise<DeploymentInfo | null> {
     const deployments = await apigw.listDeployments(apiId);
     for(const deployment of deployments) {
         if( deployment.description && deployment.description.includes(commit) ) {
-            return deployment;
+            return { id: deployment.id!, description: deployment.description };
         }
     }
     return null;
@@ -306,6 +318,51 @@ async function findMapping(domain: string, apiId: string, stage: string): Promis
     return null;
 }
 
+async function processLambdaVersionAndAlias(
+    functionName: string,
+    appAlias: string,
+    commit: string,
+    concurrency?: number,
+    dryRun: boolean = false
+): Promise<{ action: 'created' | 'exists'; version: string }> {
+    if (dryRun) {
+        logger.verbose(`   - WOULD create version and alias '${appAlias}' for function '${functionName}'`);
+        if (concurrency) {
+            logger.verbose(`   - WOULD set concurrency to ${concurrency}`);
+        }
+        return { action: 'created', version: '(dry-run)' };
+    }
+
+    let version = await findVersion(functionName, commit);
+    let alias = await findAlias(functionName, appAlias);
+    if (alias) {
+        logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
+        if (concurrency) {
+            await lambda.updateProvisionedConcurrency(functionName, appAlias, Number(concurrency));
+            logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${concurrency}`);
+        }
+        return { action: 'exists', version };
+    }
+
+    if (!version) {
+        let v = await lambda.publishNewVersion(functionName, appAlias) as VersionInfo;
+        version = v.version;
+        logger.verbose(`   - using version ${version} for '${commit}'`);
+        let arn = v.arn.substring(0, v.arn.lastIndexOf(':'));
+        let tags = await lambda.listFunctionTags(arn);
+        if (tags.Commit !== commit) {
+            logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
+        }
+    }
+    await lambda.createAlias(functionName, appAlias, version);
+    logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
+    if (concurrency) {
+        await lambda.updateProvisionedConcurrency(functionName, appAlias, Number(concurrency));
+        logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${concurrency}`);
+    }
+    return { action: 'created', version };
+}
+
 async function getStageConfig(stage: string): Promise<StageConfig> {
     const stageConfigs: StageConfig[] = await getConfig("stages");
     let foundConfig: StageConfig | null = null;
@@ -317,13 +374,12 @@ async function getStageConfig(stage: string): Promise<StageConfig> {
     }
 
     if( !foundConfig ) {
-        console.log(`No configuration for ${stage}`);
-        process.exit(-1);
+        throw new Error(`No configuration found for stage '${stage}'`);
     }
     return foundConfig!;
 }
 
-async function processFunctionEnvironmentVars(): Promise<EnvResult[]> {
+async function processFunctionEnvironmentVars(dryRun: boolean = false): Promise<EnvResult[]> {
     const apiFunctions =  await getLambdaExports('api');
     const snsFunctions =  await getLambdaExports('sns');
     const functions = [...apiFunctions,...snsFunctions];
@@ -333,8 +389,12 @@ async function processFunctionEnvironmentVars(): Promise<EnvResult[]> {
         const functionName = f.value!;
         const funcEnv = await getVars(f.env);
         if( funcEnv ) {
-            logger.verbose(`   - setting environment vars for function: '${functionName}'...`);
-            await lambda.updateEnvironmentVariables(functionName,funcEnv);
+            if (dryRun) {
+                logger.verbose(`   - WOULD set ${Object.keys(funcEnv).length} environment vars for function: '${functionName}'`);
+            } else {
+                logger.verbose(`   - setting environment vars for function: '${functionName}'...`);
+                await lambda.updateEnvironmentVariables(functionName,funcEnv);
+            }
             results.push({ name: functionName, updated: true, varCount: Object.keys(funcEnv).length });
         } else {
             logger.verbose(`     x no vars for '${functionName}'`);
@@ -344,47 +404,19 @@ async function processFunctionEnvironmentVars(): Promise<EnvResult[]> {
     return results;
 }
 
-async function processApiGatewayFunctions(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIFunctionResult[]> {
-    const localStageConfig = await getStageConfig(stage);
+async function processApiGatewayFunctions(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIFunctionResult[]> {
     const functions =  await getLambdaExports('api',apiFilter);
     const results: APIFunctionResult[] = [];
     logger.verbose(`\n * Creating versions and aliases for functions:`);
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
-        const functionName = f.value!;
-        let version = await findVersion(functionName,commit);
-        let alias = await findAlias(functionName,appAlias);
-        if( alias ) {
-            logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
-            if( f.concurrency ) {
-                await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
-                logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
-            }
-            results.push({ name: functionName, action: 'exists', version });
-        }else{
-            if( !version ) {
-                let v: VersionInfo = await lambda.publishNewVersion(functionName,appAlias);
-                version = v.version;
-                logger.verbose(`   - using version ${version} for '${commit}'`);
-                let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                let tags = await lambda.listFunctionTags(arn);
-                if( tags.Commit !== commit ) {
-                    logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
-                }
-            }
-            await lambda.createAlias(functionName,appAlias,version);
-            logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
-            if( f.concurrency ) {
-                await lambda.updateProvisionedConcurrency(functionName,appAlias,Number(f.concurrency));
-                logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${f.concurrency}`);
-            }
-            results.push({ name: functionName, action: 'created', version });
-        }
+        const { action, version } = await processLambdaVersionAndAlias(f.value!, appAlias, commit, f.concurrency, dryRun);
+        results.push({ name: f.value!, action, version });
     }
     return results;
 }
 
-async function processApiGatewayApis(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIDeploymentResult[]> {
+async function processApiGatewayApis(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIDeploymentResult[]> {
     const account = await getConfig("account");
     const region = await getConfig("region");
     const globalThrottle: ThrottleSettings | undefined = await getConfig("throttle");
@@ -395,6 +427,15 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
     for(const api of apis) {
         const apiId = api.value!;
         logger.verbose(` * Checking api ${api.name} [${api.value}]...`);
+        if (dryRun) {
+            let path = api.path;
+            if (localStageConfig.mapping.path) {
+                path = localStageConfig.mapping.path + "/" + path;
+            }
+            logger.verbose(`   - WOULD create deployment, update stage '${stage}', and map to ${localStageConfig.mapping.domain}/${path}`);
+            results.push({ name: api.name, deployment: 'created', stage: 'created', mapping: 'created', throttle: 'dry-run', functions: api.functions.length });
+            continue;
+        }
         let deploymentAction: 'created' | 'existing' = 'existing';
         let deployment = await findDeployment(apiId,commit);
         if( !deployment ) {
@@ -442,7 +483,7 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
             stageAction = 'created';
         }
 
-        let path = api.path;
+        let path = api.path || '';
         if( localStageConfig.mapping.path ) {
             path = localStageConfig.mapping.path + "/" + path;
         }
@@ -481,44 +522,25 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
     return results;
 }
 
-async function processApiGateway(stage: string, appAlias: string, commit: string, apiFilter?: string): Promise<APIResult> {
-    const functions = await processApiGatewayFunctions(stage,appAlias,commit,apiFilter);
-    const apis = await processApiGatewayApis(stage,appAlias,commit,apiFilter);
+async function processApiGateway(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIResult> {
+    const functions = await processApiGatewayFunctions(stage,appAlias,commit,apiFilter,dryRun);
+    const apis = await processApiGatewayApis(stage,appAlias,commit,apiFilter,dryRun);
     return { functions, apis };
 }
 
-async function processSNSFunctions(stage: string, appAlias: string, commit: string): Promise<SNSFunctionResult[]> {
+async function processSNSFunctions(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SNSFunctionResult[]> {
     const functions =  await getLambdaExports('sns');
     const results: SNSFunctionResult[] = [];
     logger.verbose(`\nCreating versions and aliases for functions:`);
     for(const f of functions) {
         logger.verbose(` * Checking function '${f.value}'...`);
-        const functionName = f.value!;
-        let version = await findVersion(functionName,commit);
-        let alias = await findAlias(functionName,appAlias);
-        if( alias ) {
-            logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
-            results.push({ name: functionName, action: 'exists', version });
-        }else if( !alias ) {
-            if( !version ) {
-                let v: VersionInfo = await lambda.publishNewVersion(functionName,appAlias);
-                version = v.version;
-                logger.verbose(`   - using version ${version} for '${commit}'`);
-                let arn = v.arn.substring(0, v.arn.lastIndexOf(':')) ;
-                let tags = await lambda.listFunctionTags(arn);
-                if( tags.Commit !== commit ) {
-                    logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
-                }
-            }
-            await lambda.createAlias(functionName,appAlias,version);
-            logger.verbose(`   - alias '${appAlias}' for commit '${commit}' created for function '${functionName}'`);
-            results.push({ name: functionName, action: 'created', version });
-        }
+        const { action, version } = await processLambdaVersionAndAlias(f.value!, appAlias, commit, undefined, dryRun);
+        results.push({ name: f.value!, action, version });
     }
     return results;
 }
 
-async function processSNSSubscriptions(stage: string, appAlias: string, commit: string): Promise<SNSSubscriptionResult[]> {
+async function processSNSSubscriptions(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SNSSubscriptionResult[]> {
     const account = await getConfig("account");
     const region = await getConfig("region");
     const topics = await getExportsByType('sns');
@@ -535,15 +557,23 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
             }
         }
 
+        if (dryRun) {
+            for (const f of topic.functions) {
+                logger.verbose(`   - WOULD subscribe '${f.value}' to SNS topic '${topic.name}'`);
+            }
+            results.push({ name: topic.name, action: 'subscribed', oldRemoved: 0 });
+            continue;
+        }
+
         let oldRemoved = 0;
         for(const f of topic.functions) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value!;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
-            await lambda.addFunctionPermission(functionArn, topic.value,'sns.amazonaws.com');
+            await lambda.addFunctionPermission(functionArn, topic.value!,'sns.amazonaws.com');
 
             // cleaning up existing subscriptions
-            const subscriptions = await sns.listSubscriptionsByTopic(topic.value);
+            const subscriptions = await sns.listSubscriptionsByTopic(topic.value!);
             for(const subscription of subscriptions) {
                 const parts = subscription.endpoint.split(':');
                 if( parts.length === 8 && parts[7] !== appAlias ) {
@@ -554,25 +584,25 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
             }
 
             logger.verbose(`   - subscribing lambda to SNS topic '${topic.name}'`);
-            await sns.subscribeLambdaToTopic(topic.value,functionArn);
+            await sns.subscribeLambdaToTopic(topic.value!,functionArn);
         }
         results.push({ name: topic.name, action: 'subscribed', oldRemoved });
     }
     return results;
 }
 
-async function processSNS(stage: string, appAlias: string, commit: string): Promise<SNSResult | null> {
+async function processSNS(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SNSResult | null> {
     const topics = await getExportsByType('sns');
     if (topics.length === 0) {
         return null;
     }
     logger.verbose(`\nUpdating sns topics:`);
-    const functions = await processSNSFunctions(stage,appAlias,commit);
-    const subscriptions = await processSNSSubscriptions(stage,appAlias,commit);
+    const functions = await processSNSFunctions(stage,appAlias,commit,dryRun);
+    const subscriptions = await processSNSSubscriptions(stage,appAlias,commit,dryRun);
     return { functions, subscriptions };
 }
 
-async function processTwilio(stage: string): Promise<TwilioDeployResult | null> {
+async function processTwilio(stage: string, dryRun: boolean = false): Promise<TwilioDeployResult | null> {
     if (!stageConfig || !stageConfig.twilio) {
         return null;
     }
@@ -612,6 +642,12 @@ async function processTwilio(stage: string): Promise<TwilioDeployResult | null> 
     }
     const isMessagingService = twilio.isMessagingServiceSid(sid);
 
+    if (dryRun) {
+        const type = isMessagingService ? 'messaging service' : 'phone number';
+        logger.verbose(`   - WOULD update Twilio ${type} ${sid} webhook to ${webhookUrl}`);
+        return { messagingSid: sid, webhookUrl, action: 'updated' as const };
+    }
+
     if (isMessagingService) {
         logger.verbose(`\n * Updating Twilio messaging service webhook:`);
         logger.verbose(`   - messaging service SID: ${sid}`);
@@ -650,7 +686,7 @@ async function processTwilio(stage: string): Promise<TwilioDeployResult | null> 
 }
 
 async function resolveFargateConfig(): Promise<{ cluster: string; ecrRepository: string; containerName: string; httpApi?: string }> {
-    const fargate: FargateConfig = await getConfig('fargate');
+    const fargate: FargateConfig | undefined = await getConfig('fargate');
     if (!fargate) {
         throw new Error("'fargate' configuration is required when computeMode is 'fargate'");
     }
@@ -813,11 +849,29 @@ async function processFargateRestart(stage: string, noWait: boolean = false): Pr
     };
 }
 
-module.exports = {
+async function validateRollbackTarget(appAlias: string): Promise<{ valid: boolean; warnings: string[] }> {
+    const warnings: string[] = [];
+    const apiFunctions = await getLambdaExports('api');
+    const snsFunctions = await getLambdaExports('sns');
+    const allFunctions = [...apiFunctions, ...snsFunctions];
+
+    for (const f of allFunctions) {
+        const functionName = f.value!;
+        const alias = await findAlias(functionName, appAlias);
+        if (!alias) {
+            warnings.push(`Alias '${appAlias}' not found for ${functionName} — will create from $LATEST`);
+        }
+    }
+
+    return { valid: warnings.length === 0, warnings };
+}
+
+export {
     getLambdaExports,
     getExportsByType,
     getConfig,
     getVar,
+    validateRollbackTarget,
     processFunctionEnvironmentVars,
     processApiGateway,
     processSNS,
@@ -826,4 +880,5 @@ module.exports = {
     processFargateRestart,
     resolveFargateConfig,
     resolveVariable,
-    setStageConfig};
+    setStageConfig
+};

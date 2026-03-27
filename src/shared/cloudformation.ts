@@ -1,7 +1,7 @@
 import { ListExportsCommand, CloudFormationClient, Export } from "@aws-sdk/client-cloudformation";
 
-const { getConfig } = require('./config');
-const { awsRetry } = require('./utils');
+import { getConfig } from './config';
+import { awsRetry } from './utils';
 
 let client: CloudFormationClient | null = null;
 
@@ -20,7 +20,7 @@ async function listExports(): Promise<Export[] | null> {
         const cfClient = await getClient();
 
         do {
-            const command = new ListExportsCommand({ NextToken: nextToken });
+            const command: ListExportsCommand = new ListExportsCommand({ NextToken: nextToken });
             const response = await awsRetry(() => cfClient.send(command));
             exports.push(...(response.Exports || []));
             nextToken = response.NextToken;
@@ -33,4 +33,4 @@ async function listExports(): Promise<Export[] | null> {
     return null;
 }
 
-module.exports = {listExports};
+export { listExports };

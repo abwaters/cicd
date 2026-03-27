@@ -1,10 +1,10 @@
 import { FargateRestartResult } from './types';
 
-const cicd = require('./shared/cicd');
-const options = require("./shared/options");
-const credentials = require('./shared/credentials');
-const logger = require('./shared/logger');
-const { printHeader } = require('./shared/header');
+import * as cicd from './shared/cicd';
+import * as options from './shared/options';
+import * as credentials from './shared/credentials';
+import * as logger from './shared/logger';
+import { printHeader } from './shared/header';
 
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding

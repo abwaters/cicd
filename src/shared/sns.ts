@@ -1,8 +1,8 @@
 import { SNSClient, SubscribeCommand, ListSubscriptionsByTopicCommand, UnsubscribeCommand } from "@aws-sdk/client-sns";
 import { SubscriptionInfo } from '../types';
 
-const { getConfig } = require('./config');
-const { awsRetry } = require('./utils');
+import { getConfig } from './config';
+import { awsRetry } from './utils';
 
 let client: SNSClient | null = null;
 
@@ -69,4 +69,4 @@ async function deleteSubscription(subscriptionArn: string): Promise<void> {
     }
 }
 
-module.exports = {subscribeLambdaToTopic, listSubscriptionsByTopic, deleteSubscription};
+export { subscribeLambdaToTopic, listSubscriptionsByTopic, deleteSubscription };
