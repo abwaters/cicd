@@ -1,6 +1,6 @@
 import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
-const { getConfig } = require('./config');
-const { awsRetry } = require('./utils');
+import { getConfig } from './config';
+import { awsRetry } from './utils';
 
 let client: STSClient | null = null;
 
@@ -25,4 +25,4 @@ async function getAccountNumber(): Promise<string> {
     }
 }
 
-module.exports = { getAccountNumber };
+export { getAccountNumber };

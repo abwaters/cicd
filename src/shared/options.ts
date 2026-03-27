@@ -41,4 +41,4 @@ function stripOptions(args: string[]): string[] {
     return args.filter(arg=>!arg.startsWith('--') && !SHORT_FLAGS[arg]);
 }
 
-module.exports = {getOptions,stripOptions};
+export { getOptions, stripOptions };

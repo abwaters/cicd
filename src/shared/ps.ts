@@ -1,7 +1,7 @@
 import { SSMClient, GetParameterCommand, GetParametersByPathCommand } from "@aws-sdk/client-ssm";
 
-const { getConfig } = require('./config');
-const { awsRetry } = require('./utils');
+import { getConfig } from './config';
+import { awsRetry } from './utils';
 
 let client: SSMClient | null = null;
 const psValues = new Map<string, string>();
@@ -56,4 +56,4 @@ async function getParametersByPath(path: string, withDecryption: boolean): Promi
     }
 }
 
-module.exports = {getParameterValue, getParametersByPath};
+export { getParameterValue, getParametersByPath };

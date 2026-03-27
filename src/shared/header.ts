@@ -10,4 +10,4 @@ function printHeader(): void {
     console.log();
 }
 
-module.exports = { printHeader };
+export { printHeader };

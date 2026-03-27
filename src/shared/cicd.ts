@@ -19,15 +19,15 @@ import {
 import { Deployment, Stage, BasePathMapping } from '@aws-sdk/client-api-gateway';
 import { ContainerDefinition } from '@aws-sdk/client-ecs';
 
-const lambda = require("./lambda");
-const apigw = require("./apigw");
-const sns = require("./sns");
-const twilio = require("./twilio");
-const ecs = require("./ecs");
-const cf = require('./cloudformation');
-const ps = require('./ps');
-const {getConfig} = require('./config');
-const logger = require('./logger');
+import * as lambda from './lambda';
+import * as apigw from './apigw';
+import * as sns from './sns';
+import * as twilio from './twilio';
+import * as ecs from './ecs';
+import * as cf from './cloudformation';
+import * as ps from './ps';
+import { getConfig } from './config';
+import * as logger from './logger';
 
 const rawExports = new Map<string, string>();
 const exportMap = new Map<string, ExportConfig>();
@@ -114,7 +114,7 @@ async function resolveVariable(key: string): Promise<string> {
         if( psCache.has(psName) ) {
             val = psCache.get(psName)!;
         } else {
-            val = await ps.getParameterValue(psName, true);
+            val = await ps.getParameterValue(psName, true) ?? '';
             if (val) {
                 val = val.replace(/\\"/g, '"');
                 val = val.replace(/\\\\n/g, "\\n");
@@ -172,15 +172,15 @@ async function initExports(): Promise<void> {
 
         // get exports and load them
         const response = await cf.listExports();
-        for(const e of response) {
-            if( exportMap.has(e.Name) ) {
-                const cfg = exportMap.get(e.Name)!;
+        for(const e of (response || [])) {
+            if( exportMap.has(e.Name!) ) {
+                const cfg = exportMap.get(e.Name!)!;
                 cfg.value = e.Value;
-            }else if( functionMap.has(e.Name) ) {
-                const cfg = functionMap.get(e.Name)!;
+            }else if( functionMap.has(e.Name!) ) {
+                const cfg = functionMap.get(e.Name!)!;
                 cfg.value = e.Value;
             }
-            rawExports.set(e.Name,e.Value);
+            rawExports.set(e.Name!,e.Value!);
         }
 
         // did we miss any exports in the config?
@@ -278,7 +278,7 @@ async function findAlias(functionName: string, commit: string): Promise<string> 
 
 async function findTag(functionName: string, commit: string): Promise<boolean> {
     const fc = await lambda.describeFunction(functionName);
-    const tags = await lambda.listFunctionTags(fc.FunctionArn);
+    const tags = await lambda.listFunctionTags(fc!.FunctionArn!);
     if( tags.hasOwnProperty('Commit') ) {
         if( tags.Commit.includes(commit) ) {
             return true;
@@ -287,11 +287,11 @@ async function findTag(functionName: string, commit: string): Promise<boolean> {
     return false;
 }
 
-async function findDeployment(apiId: string, commit: string): Promise<Deployment | null> {
+async function findDeployment(apiId: string, commit: string): Promise<DeploymentInfo | null> {
     const deployments = await apigw.listDeployments(apiId);
     for(const deployment of deployments) {
         if( deployment.description && deployment.description.includes(commit) ) {
-            return deployment;
+            return { id: deployment.id!, description: deployment.description };
         }
     }
     return null;
@@ -344,7 +344,7 @@ async function processLambdaVersionAndAlias(
     }
 
     if (!version) {
-        let v: VersionInfo = await lambda.publishNewVersion(functionName, appAlias);
+        let v = await lambda.publishNewVersion(functionName, appAlias) as VersionInfo;
         version = v.version;
         logger.verbose(`   - using version ${version} for '${commit}'`);
         let arn = v.arn.substring(0, v.arn.lastIndexOf(':'));
@@ -865,7 +865,7 @@ async function validateRollbackTarget(appAlias: string): Promise<{ valid: boolea
     return { valid: warnings.length === 0, warnings };
 }
 
-module.exports = {
+export {
     getLambdaExports,
     getExportsByType,
     getConfig,
@@ -879,4 +879,5 @@ module.exports = {
     processFargateRestart,
     resolveFargateConfig,
     resolveVariable,
-    setStageConfig};
+    setStageConfig
+};

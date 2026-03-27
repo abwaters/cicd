@@ -18,9 +18,4 @@ function error(...args: unknown[]): void {
     console.error(...args);
 }
 
-module.exports = {
-    setVerbose,
-    verbose,
-    log,
-    error
-};
+export { setVerbose, verbose, log, error };

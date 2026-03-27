@@ -11,8 +11,9 @@ import {
     RegisterTaskDefinitionCommandInput
 } from "@aws-sdk/client-ecs";
 
-const { getConfig } = require('./config');
-const { awsRetry } = require('./utils');
+import { getConfig } from './config';
+import { awsRetry } from './utils';
+import * as logger from './logger';
 
 let client: ECSClient | null = null;
 
@@ -112,7 +113,6 @@ async function waitForServicesStable(cluster: string, service: string): Promise<
     const maxWaitTime = 600;
     const pollInterval = 15;
     const startTime = Date.now();
-    const logger = require('./logger');
 
     while ((Date.now() - startTime) / 1000 < maxWaitTime) {
         const command = new DescribeServicesCommand({
@@ -182,7 +182,7 @@ async function deregisterTaskDefinition(taskDefinitionArn: string): Promise<void
     await awsRetry(() => ecsClient.send(command));
 }
 
-module.exports = {
+export {
     describeService,
     describeTaskDefinition,
     registerTaskDefinition,

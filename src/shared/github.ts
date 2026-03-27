@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import { GitHubDeployment } from '../types';
 
-const logger = require('./logger');
+import * as logger from './logger';
 
 let ghAvailable: boolean | null = null;
 
@@ -116,7 +116,7 @@ function listDeployments(repo: string, environment: string, count: number = 5): 
     }
 }
 
-module.exports = {
+export {
     isGhAvailable,
     createDeployment,
     updateDeploymentStatus,

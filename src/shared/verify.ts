@@ -1,7 +1,7 @@
-const cicd = require('./cicd');
-const apigw = require('./apigw');
-const sns = require('./sns');
-const logger = require('./logger');
+import * as cicd from './cicd';
+import * as apigw from './apigw';
+import * as sns from './sns';
+import * as logger from './logger';
 
 export interface VerificationResult {
     passed: boolean;
@@ -90,4 +90,4 @@ function printVerificationResult(result: VerificationResult): void {
     }
 }
 
-module.exports = { verifyDeployment, printVerificationResult };
+export { verifyDeployment, printVerificationResult };

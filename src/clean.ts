@@ -1,15 +1,15 @@
 import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult, CleanEcrResult } from './types';
 
-const sns = require('./shared/sns');
-const lambda = require('./shared/lambda');
-const apigw = require('./shared/apigw');
-const ecs = require('./shared/ecs');
-const ecr = require('./shared/ecr');
-const cicd = require('./shared/cicd');
-const credentials = require('./shared/credentials');
-const options = require('./shared/options');
-const logger = require('./shared/logger');
-const { printHeader } = require('./shared/header');
+import * as sns from './shared/sns';
+import * as lambda from './shared/lambda';
+import * as apigw from './shared/apigw';
+import * as ecs from './shared/ecs';
+import * as ecr from './shared/ecr';
+import * as cicd from './shared/cicd';
+import * as credentials from './shared/credentials';
+import * as options from './shared/options';
+import * as logger from './shared/logger';
+import { printHeader } from './shared/header';
 
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding

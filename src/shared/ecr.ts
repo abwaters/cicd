@@ -5,9 +5,9 @@ import {
     ImageIdentifier
 } from "@aws-sdk/client-ecr";
 
-const { getConfig } = require('./config');
-const { awsRetry } = require('./utils');
-const logger = require('./logger');
+import { getConfig } from './config';
+import { awsRetry } from './utils';
+import * as logger from './logger';
 
 let client: ECRClient | null = null;
 
@@ -68,8 +68,4 @@ async function batchDeleteImages(repositoryName: string, imageIds: ImageIdentifi
     return { deleted, failures };
 }
 
-module.exports = {
-    parseRepositoryName,
-    listImages,
-    batchDeleteImages
-};
+export { parseRepositoryName, listImages, batchDeleteImages };

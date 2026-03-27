@@ -2,15 +2,14 @@ import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResul
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope, scopeLabel } from './shared/scope';
 
-const verify = require('./shared/verify');
-
-const cicd = require('./shared/cicd');
-const options = require("./shared/options");
-const credentials = require('./shared/credentials');
-const logger = require('./shared/logger');
-const github = require('./shared/github');
-const { printHeader } = require('./shared/header');
-const readline = require('readline');
+import * as verify from './shared/verify';
+import * as cicd from './shared/cicd';
+import * as options from './shared/options';
+import * as credentials from './shared/credentials';
+import * as logger from './shared/logger';
+import * as github from './shared/github';
+import { printHeader } from './shared/header';
+import * as readline from 'readline';
 
 function prompt(question: string): Promise<string> {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

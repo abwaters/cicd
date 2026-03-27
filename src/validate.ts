@@ -3,9 +3,9 @@ import * as path from 'path';
 import Ajv, { ErrorObject } from 'ajv';
 import { CICDConfig, ThrottleSettings } from './types';
 
-const options = require('./shared/options');
-const logger = require('./shared/logger');
-const { printHeader } = require('./shared/header');
+import * as options from './shared/options';
+import * as logger from './shared/logger';
+import { printHeader } from './shared/header';
 
 function semanticValidation(config: CICDConfig): string[] {
     const errors: string[] = [];

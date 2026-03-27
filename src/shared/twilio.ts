@@ -1,6 +1,6 @@
 import { TwilioPhoneResult, TwilioPhoneInfo, TwilioMessagingResult, TwilioMessagingInfo } from '../types';
 
-const Twilio = require('twilio');
+import Twilio from 'twilio';
 
 async function updatePhoneNumberWebhook(accountSid: string, authToken: string, phoneNumberSid: string, smsUrl: string): Promise<TwilioPhoneResult> {
     const client = Twilio(accountSid, authToken);
@@ -55,4 +55,4 @@ function isMessagingServiceSid(sid: string): boolean {
     return !!sid && sid.startsWith('MG');
 }
 
-module.exports = { updatePhoneNumberWebhook, getPhoneNumber, updateMessagingServiceWebhook, getMessagingService, isMessagingServiceSid };
+export { updatePhoneNumberWebhook, getPhoneNumber, updateMessagingServiceWebhook, getMessagingService, isMessagingServiceSid };
