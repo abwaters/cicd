@@ -764,11 +764,37 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
 
     // 7. Wait for stability
     logger.verbose(`   - waiting for service stability...`);
-    const stable = await ecs.waitForServicesStable(fargateConfig.cluster, localStageConfig.service);
-    if (stable) {
+    const stabilityResult = await ecs.waitForServicesStable(fargateConfig.cluster, localStageConfig.service);
+
+    let rolledBack = false;
+
+    if (stabilityResult.stable) {
         logger.verbose(`   - service is stable`);
+    } else if (stabilityResult.failed) {
+        logger.verbose(`   - DEPLOYMENT FAILED: ${stabilityResult.failureReason}`);
+        if (stabilityResult.stoppedTaskReasons?.length) {
+            for (const reason of stabilityResult.stoppedTaskReasons) {
+                logger.verbose(`     stopped task: ${reason}`);
+            }
+        }
+        // Auto-rollback to previous task definition
+        logger.verbose(`   - rolling back to previous task definition: ${serviceInfo.taskDefinitionArn}`);
+        await ecs.updateService(fargateConfig.cluster, localStageConfig.service, serviceInfo.taskDefinitionArn);
+        logger.verbose(`   - rollback initiated, waiting for stability...`);
+        const rollbackResult = await ecs.waitForServicesStable(fargateConfig.cluster, localStageConfig.service);
+        if (rollbackResult.stable) {
+            logger.verbose(`   - rollback complete, service is stable`);
+        } else {
+            logger.verbose(`   - WARNING: rollback did not stabilize within timeout`);
+        }
+        rolledBack = true;
     } else {
         logger.verbose(`   - WARNING: service did not stabilize within timeout`);
+        if (stabilityResult.stoppedTaskReasons?.length) {
+            for (const reason of stabilityResult.stoppedTaskReasons) {
+                logger.verbose(`     stopped task: ${reason}`);
+            }
+        }
     }
 
     // 8. Ensure HTTP API custom domain mapping
@@ -805,7 +831,11 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
         taskDefinitionArn: newTaskDefArn,
         previousTaskDefinitionArn: serviceInfo.taskDefinitionArn,
         image,
-        serviceStable: stable
+        serviceStable: stabilityResult.stable,
+        deploymentFailed: stabilityResult.failed,
+        failureReason: stabilityResult.failureReason,
+        stoppedTaskReasons: stabilityResult.stoppedTaskReasons,
+        rolledBack
     };
 }
 
@@ -833,11 +863,24 @@ async function processFargateRestart(stage: string, noWait: boolean = false): Pr
     let stable = true;
     if (!noWait) {
         logger.verbose(`   - waiting for service stability...`);
-        stable = await ecs.waitForServicesStable(fargateConfig.cluster, localStageConfig.service);
-        if (stable) {
+        const stabilityResult = await ecs.waitForServicesStable(fargateConfig.cluster, localStageConfig.service);
+        stable = stabilityResult.stable;
+        if (stabilityResult.stable) {
             logger.verbose(`   - service is stable`);
+        } else if (stabilityResult.failed) {
+            logger.verbose(`   - RESTART FAILED: ${stabilityResult.failureReason}`);
+            if (stabilityResult.stoppedTaskReasons?.length) {
+                for (const reason of stabilityResult.stoppedTaskReasons) {
+                    logger.verbose(`     stopped task: ${reason}`);
+                }
+            }
         } else {
             logger.verbose(`   - WARNING: service did not stabilize within timeout`);
+            if (stabilityResult.stoppedTaskReasons?.length) {
+                for (const reason of stabilityResult.stoppedTaskReasons) {
+                    logger.verbose(`     stopped task: ${reason}`);
+                }
+            }
         }
     } else {
         logger.verbose(`   - skipping stability wait (--no-wait)`);

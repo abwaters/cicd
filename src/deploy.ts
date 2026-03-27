@@ -67,15 +67,33 @@ async function main(): Promise<void> {
             console.log(`  Previous:        ${result.previousTaskDefinitionArn}`);
             console.log(`  Service Stable:  ${result.serviceStable ? 'yes' : 'no'}`);
 
-            if (!result.serviceStable) {
+            if (result.deploymentFailed) {
+                console.log(`\n  FAILED: ${result.failureReason}`);
+                if (result.stoppedTaskReasons?.length) {
+                    for (const reason of result.stoppedTaskReasons) {
+                        console.log(`    - ${reason}`);
+                    }
+                }
+                if (result.rolledBack) {
+                    console.log(`\n  Rolled back to previous task definition: ${result.previousTaskDefinitionArn}`);
+                }
+            } else if (!result.serviceStable) {
                 console.log(`\n  WARNING: Service did not stabilize within timeout. Check ECS console.`);
+                if (result.stoppedTaskReasons?.length) {
+                    for (const reason of result.stoppedTaskReasons) {
+                        console.log(`    - ${reason}`);
+                    }
+                }
             }
 
-            const summary = `Fargate service updated to commit ${commit}`;
+            const deployStatus = result.deploymentFailed ? 'failure' : 'success';
+            const summary = result.deploymentFailed
+                ? `Fargate deployment failed for commit ${commit}${result.rolledBack ? ' (rolled back)' : ''}`
+                : `Fargate service updated to commit ${commit}`;
             console.log(`\nSummary: ${summary}`);
 
             if (repo && ghDeployment) {
-                github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Deployed ${appAlias} to ${stage}: ${summary}`);
+                github.updateDeploymentStatus(repo, ghDeployment.id, deployStatus, `Deployed ${appAlias} to ${stage}: ${summary}`);
             }
         } catch (err: any) {
             if (repo && ghDeployment) {
