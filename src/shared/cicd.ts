@@ -51,14 +51,10 @@ async function init(): Promise<void> {
 
 async function getVar(key: string): Promise<string> {
     await init();
-    let val = '';
-    if( envCache!.has(key) ) {
-        val = envCache!.get(key)!;
+    if( !envCache!.has(key) ) {
+        throw new Error(`Environment variable '${key}' not found in configuration`);
     }
-    if( !val ) {
-        throw new Error(`Environment variable '${key}' resolved to empty value`);
-    }
-    return val ;
+    return envCache!.get(key)!;
 }
 
 async function expandVarNames(varNames: string): Promise<string[]> {
