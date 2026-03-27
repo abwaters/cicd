@@ -40,6 +40,9 @@ async function main(): Promise<void> {
             case 'restart':
                 require('./restart');
                 break;
+            case 'env':
+                require('./env');
+                break;
             default:
                 console.error(`Error: Unknown command '${command}'\n`);
                 showUsage();
@@ -70,6 +73,10 @@ Commands:
 
   restart <stage>             Force restart a Fargate service (fargate mode only)
                               Options: --no-wait, --verbose
+
+  env <stage>                 Output resolved environment variables for a stage
+                              Options: --linux, --powershell, --verbose
+                              Default format: Windows CMD (set KEY=VALUE)
 
   validate                    Validate cicd.json against schema
                               Options: --verbose
