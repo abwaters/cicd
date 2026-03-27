@@ -132,12 +132,12 @@ async function main(): Promise<void> {
         const apistages = await apigw.listStages(apiId);
         for(const s of apistages) {
             const name = api.name;
-            const stagename = s.stageName;
-            const commit = s.variables.Commit;
+            const stagename = s.stageName!;
+            const commit = s.variables!.Commit;
             const apiInfo = {
                 name,
                 stage: stagename,
-                commit: s.variables.Commit,
+                commit: s.variables!.Commit,
                 functions: [] as any[]
             };
             if( !stagesInfo[stagename].commits.hasOwnProperty(commit) ) {
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     // Collect SNS topic results
     const topicResults: InfoTopicResult[] = [];
     for(const topic of topics) {
-        const subs = await sns.listSubscriptionsByTopic(topic.value);
+        const subs = await sns.listSubscriptionsByTopic(topic.value!);
         let commit = '';
         for(const sub of subs) {
             if( sub.protocol === 'lambda' ) {

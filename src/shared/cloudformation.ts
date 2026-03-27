@@ -21,7 +21,7 @@ async function listExports(): Promise<Export[] | null> {
 
         do {
             const command: ListExportsCommand = new ListExportsCommand({ NextToken: nextToken });
-            const response: Awaited<ReturnType<typeof cfClient.send<ListExportsCommand>>> = await awsRetry(() => cfClient.send(command));
+            const response = await awsRetry(() => cfClient.send(command));
             exports.push(...(response.Exports || []));
             nextToken = response.NextToken;
         } while (nextToken);

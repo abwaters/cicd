@@ -14,7 +14,8 @@ import {
     SNSSubscriptionResult,
     SNSResult,
     TwilioDeployResult,
-    VersionInfo
+    VersionInfo,
+    DeploymentInfo
 } from '../types';
 import { Deployment, Stage, BasePathMapping } from '@aws-sdk/client-api-gateway';
 import { ContainerDefinition } from '@aws-sdk/client-ecs';
@@ -482,7 +483,7 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
             stageAction = 'created';
         }
 
-        let path = api.path;
+        let path = api.path || '';
         if( localStageConfig.mapping.path ) {
             path = localStageConfig.mapping.path + "/" + path;
         }
@@ -569,10 +570,10 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
             logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value!;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
-            await lambda.addFunctionPermission(functionArn, topic.value,'sns.amazonaws.com');
+            await lambda.addFunctionPermission(functionArn, topic.value!,'sns.amazonaws.com');
 
             // cleaning up existing subscriptions
-            const subscriptions = await sns.listSubscriptionsByTopic(topic.value);
+            const subscriptions = await sns.listSubscriptionsByTopic(topic.value!);
             for(const subscription of subscriptions) {
                 const parts = subscription.endpoint.split(':');
                 if( parts.length === 8 && parts[7] !== appAlias ) {
@@ -583,7 +584,7 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
             }
 
             logger.verbose(`   - subscribing lambda to SNS topic '${topic.name}'`);
-            await sns.subscribeLambdaToTopic(topic.value,functionArn);
+            await sns.subscribeLambdaToTopic(topic.value!,functionArn);
         }
         results.push({ name: topic.name, action: 'subscribed', oldRemoved });
     }
@@ -685,7 +686,7 @@ async function processTwilio(stage: string, dryRun: boolean = false): Promise<Tw
 }
 
 async function resolveFargateConfig(): Promise<{ cluster: string; ecrRepository: string; containerName: string; httpApi?: string }> {
-    const fargate: FargateConfig = await getConfig('fargate');
+    const fargate: FargateConfig | undefined = await getConfig('fargate');
     if (!fargate) {
         throw new Error("'fargate' configuration is required when computeMode is 'fargate'");
     }

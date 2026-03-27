@@ -45,7 +45,7 @@ async function verifyDeployment(stage: string, appAlias: string): Promise<Verifi
             continue;
         }
 
-        const subs = await sns.listSubscriptionsByTopic(topic.value);
+        const subs = await sns.listSubscriptionsByTopic(topic.value!);
         let foundAlias = '(no subscription)';
         for (const sub of subs) {
             if (sub.protocol === 'lambda') {
