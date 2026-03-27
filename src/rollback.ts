@@ -156,15 +156,30 @@ async function main(): Promise<void> {
             console.log(`  Previous:        ${result.previousTaskDefinitionArn}`);
             console.log(`  Service Stable:  ${result.serviceStable ? 'yes' : 'no'}`);
 
-            if (!result.serviceStable) {
+            if (result.deploymentFailed) {
+                console.log(`\n  FAILED: ${result.failureReason}`);
+                if (result.stoppedTaskReasons?.length) {
+                    for (const reason of result.stoppedTaskReasons) {
+                        console.log(`    - ${reason}`);
+                    }
+                }
+            } else if (!result.serviceStable) {
                 console.log(`\n  WARNING: Service did not stabilize within timeout. Check ECS console.`);
+                if (result.stoppedTaskReasons?.length) {
+                    for (const reason of result.stoppedTaskReasons) {
+                        console.log(`    - ${reason}`);
+                    }
+                }
             }
 
-            const summary = `Fargate service rolled back to commit ${commit}`;
+            const rollbackStatus = result.deploymentFailed ? 'failure' : 'success';
+            const summary = result.deploymentFailed
+                ? `Fargate rollback failed for commit ${commit}`
+                : `Fargate service rolled back to commit ${commit}`;
             console.log(`\nRollback complete: ${summary}`);
 
             if (ghDeployment) {
-                github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Rolled back ${appAlias} on ${stage}: ${summary}`);
+                github.updateDeploymentStatus(repo, ghDeployment.id, rollbackStatus, `Rolled back ${appAlias} on ${stage}: ${summary}`);
             }
         } catch (err: any) {
             if (ghDeployment) {

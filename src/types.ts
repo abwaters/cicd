@@ -289,6 +289,10 @@ export interface FargateDeployResult {
     previousTaskDefinitionArn: string;
     image: string;
     serviceStable: boolean;
+    deploymentFailed: boolean;
+    failureReason?: string;
+    stoppedTaskReasons?: string[];
+    rolledBack: boolean;
 }
 
 export interface FargateRestartResult {
