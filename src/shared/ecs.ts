@@ -183,7 +183,16 @@ async function waitForServicesStable(cluster: string, service: string): Promise<
         const elapsed = Math.round((Date.now() - startTime) / 1000);
 
         if (primary) {
-            logger.verbose(`   - [${formatDuration(elapsed)}] primary: ${primary.runningCount}/${primary.desiredCount} running, ${primary.rolloutState || 'unknown'}, ${activeDeployments.length} draining`);
+            const drainingTasks = activeDeployments.reduce((sum: number, d: any) => sum + (d.runningCount || 0), 0);
+            const parts = [
+                `desired=${primary.desiredCount}`,
+                `running=${primary.runningCount}`,
+                primary.rolloutState || 'unknown'
+            ];
+            if (drainingTasks > 0) {
+                parts.push(`${drainingTasks} draining`);
+            }
+            logger.verbose(`   - [${formatDuration(elapsed)}] ${parts.join(', ')}`);
         }
 
         // Detect failed rollout early
