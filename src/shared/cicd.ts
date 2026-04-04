@@ -756,8 +756,14 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
         ...currentTaskDef,
         family: localStageConfig.taskFamily
     };
-    const newTaskDefArn = await ecs.registerTaskDefinition(taskDefWithFamily, newContainerDefs);
+    const overrides = (localStageConfig.cpu || localStageConfig.memory)
+        ? { cpu: localStageConfig.cpu, memory: localStageConfig.memory }
+        : undefined;
+    const newTaskDefArn = await ecs.registerTaskDefinition(taskDefWithFamily, newContainerDefs, overrides);
     logger.verbose(`   - registered new task definition: ${newTaskDefArn}`);
+    if (overrides) {
+        logger.verbose(`   - cpu: ${overrides.cpu || currentTaskDef.cpu}, memory: ${overrides.memory || currentTaskDef.memory}`);
+    }
 
     // 6. Update service
     await ecs.updateService(fargateConfig.cluster, localStageConfig.service, newTaskDefArn);

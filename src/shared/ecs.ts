@@ -67,7 +67,8 @@ async function describeTaskDefinition(taskDefinitionArn: string): Promise<TaskDe
 
 async function registerTaskDefinition(
     currentTaskDef: TaskDefinition,
-    containerDefinitions: ContainerDefinition[]
+    containerDefinitions: ContainerDefinition[],
+    overrides?: { cpu?: string; memory?: string }
 ): Promise<string> {
     const ecsClient = await getClient();
     const input: RegisterTaskDefinitionCommandInput = {
@@ -76,8 +77,8 @@ async function registerTaskDefinition(
         taskRoleArn: currentTaskDef.taskRoleArn,
         executionRoleArn: currentTaskDef.executionRoleArn,
         networkMode: currentTaskDef.networkMode,
-        cpu: currentTaskDef.cpu,
-        memory: currentTaskDef.memory,
+        cpu: overrides?.cpu || currentTaskDef.cpu,
+        memory: overrides?.memory || currentTaskDef.memory,
         requiresCompatibilities: currentTaskDef.requiresCompatibilities,
         volumes: currentTaskDef.volumes,
         runtimePlatform: currentTaskDef.runtimePlatform,
