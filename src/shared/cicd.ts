@@ -716,6 +716,7 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
 
     // 1. Get current service state
     const serviceInfo = await ecs.describeService(fargateConfig.cluster, localStageConfig.service);
+    logger.verbose(`   - current state: desired=${serviceInfo.desiredCount}, running=${serviceInfo.runningCount}, status=${serviceInfo.status}`);
     logger.verbose(`   - current task definition: ${serviceInfo.taskDefinitionArn}`);
 
     // 2. Get current task definition for copying
@@ -853,6 +854,7 @@ async function processFargateRestart(stage: string, noWait: boolean = false): Pr
 
     // 1. Get current service state
     const serviceInfo = await ecs.describeService(fargateConfig.cluster, localStageConfig.service);
+    logger.verbose(`   - current state: desired=${serviceInfo.desiredCount}, running=${serviceInfo.runningCount}, status=${serviceInfo.status}`);
     logger.verbose(`   - current task definition: ${serviceInfo.taskDefinitionArn}`);
 
     // 2. Force new deployment
