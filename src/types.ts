@@ -60,6 +60,8 @@ export interface StageConfig {
     service?: string;
     taskFamily?: string;
     httpApi?: string;
+    cpu?: string;
+    memory?: string;
 }
 
 export interface StageMapping {
