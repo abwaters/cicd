@@ -66,13 +66,12 @@ async function main(): Promise<void> {
                 const commitEnv = (container?.environment || []).find((e: any) => e.name === 'COMMIT');
                 const commit = commitEnv?.value || imageTag;
 
-                console.log(`  ${stage.stage.padEnd(15)} ${commit}`);
+                const counts = `desired:${serviceInfo.desiredCount} running:${serviceInfo.runningCount} pending:${serviceInfo.pendingCount}`;
+                console.log(`  ${stage.stage.padEnd(15)} ${commit.padEnd(12)} ${counts}`);
                 if (o.details) {
                     console.log(`    - service:    ${stage.service}`);
                     console.log(`    - task def:   ${serviceInfo.taskDefinitionArn}`);
                     console.log(`    - image:      ${container?.image || 'unknown'}`);
-                    console.log(`    - desired:    ${serviceInfo.desiredCount}`);
-                    console.log(`    - running:    ${serviceInfo.runningCount}`);
                     console.log(`    - status:     ${serviceInfo.status}`);
                 }
             } catch (e: any) {
