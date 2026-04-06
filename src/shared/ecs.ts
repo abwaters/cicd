@@ -31,6 +31,7 @@ export interface ServiceInfo {
     taskDefinitionArn: string;
     desiredCount: number;
     runningCount: number;
+    pendingCount: number;
     status: string;
 }
 
@@ -49,6 +50,7 @@ async function describeService(cluster: string, service: string): Promise<Servic
         taskDefinitionArn: svc.taskDefinition!,
         desiredCount: svc.desiredCount || 0,
         runningCount: svc.runningCount || 0,
+        pendingCount: svc.pendingCount || 0,
         status: svc.status || 'UNKNOWN'
     };
 }
