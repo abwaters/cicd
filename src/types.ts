@@ -30,6 +30,7 @@ export interface ExportConfig {
     type: 'api' | 'sns' | 'sqs';
     name: string;
     path?: string;
+    prefix?: string;
     throttle?: ThrottleSettings;
     stages?: string[];
     functions: FunctionConfig[];
