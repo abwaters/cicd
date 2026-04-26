@@ -109,7 +109,7 @@
     },
     "exports": {
       "type": "array",
-      "description": "Array of API Gateway and SNS resources to manage",
+      "description": "Array of API Gateway, SNS, and SQS resources to manage",
       "minItems": 1,
       "items": {
         "oneOf": [
@@ -189,6 +189,38 @@
                 "minItems": 1,
                 "items": {
                   "$ref": "#/definitions/snsFunctionConfig"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "SQS queue configuration",
+            "required": ["type", "name", "functions"],
+            "properties": {
+              "type": {
+                "const": "sqs"
+              },
+              "name": {
+                "type": "string",
+                "description": "CloudFormation export name for the SQS queue ARN",
+                "minLength": 1
+              },
+              "stages": {
+                "type": "array",
+                "description": "Stages where this SQS queue should be configured",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "functions": {
+                "type": "array",
+                "description": "Lambda functions to trigger from this queue",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/definitions/sqsFunctionConfig"
                 }
               }
             },
@@ -356,6 +388,47 @@
           "type": "integer",
           "description": "Reserved concurrent executions for this Lambda function (0 for throttling)",
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "sqsFunctionConfig": {
+      "type": "object",
+      "description": "SQS queue Lambda function configuration",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "CloudFormation export name for the Lambda function ARN",
+          "minLength": 1
+        },
+        "env": {
+          "type": "string",
+          "description": "Comma-separated list of environment variable names from global or stage environment",
+          "pattern": "^(@?[A-Za-z_][A-Za-z0-9_]*)(,@?[A-Za-z_][A-Za-z0-9_]*)*$"
+        },
+        "concurrency": {
+          "type": "integer",
+          "description": "Reserved concurrent executions for this Lambda function (0 for throttling)",
+          "minimum": 0
+        },
+        "batchSize": {
+          "type": "integer",
+          "description": "Maximum number of records sent to the function in each batch",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "maximumBatchingWindowInSeconds": {
+          "type": "integer",
+          "description": "Maximum amount of time to gather records before invoking the function",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "maximumConcurrency": {
+          "type": "integer",
+          "description": "Maximum concurrent invocations from this event source",
+          "minimum": 2,
+          "maximum": 1000
         }
       },
       "additionalProperties": false

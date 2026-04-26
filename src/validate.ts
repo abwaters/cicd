@@ -54,6 +54,15 @@ function semanticValidation(config: CICDConfig): string[] {
             }
         }
 
+        // Validate SQS stages references
+        if (exp.type === 'sqs' && exp.stages) {
+            for (const s of exp.stages) {
+                if (!stageNames.has(s)) {
+                    errors.push(`SQS export '${exp.name}' references undefined stage '${s}'`);
+                }
+            }
+        }
+
         // Check for duplicate function names within a single export
         const exportFunctionNames = new Set<string>();
         for (const f of exp.functions || []) {

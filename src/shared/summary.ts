@@ -1,9 +1,10 @@
-import { EnvResult, APIResult, SNSResult, TwilioDeployResult } from '../types';
+import { EnvResult, APIResult, SNSResult, SQSResult, TwilioDeployResult } from '../types';
 
 export interface DeploymentResults {
     env?: EnvResult[] | null;
     api?: APIResult | null;
     sns?: SNSResult | null;
+    sqs?: SQSResult | null;
     twilio?: TwilioDeployResult | null;
 }
 
@@ -11,7 +12,7 @@ export interface DeploymentResults {
  * Prints detailed deployment/rollback results and returns a summary parts array.
  */
 export function printDeploymentSummary(results: DeploymentResults): string[] {
-    const { env, api, sns, twilio } = results;
+    const { env, api, sns, sqs, twilio } = results;
 
     // Environment Variables
     if (env && env.length > 0) {
@@ -61,6 +62,28 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         }
     }
 
+    // SQS Functions
+    if (sqs && sqs.functions.length > 0) {
+        console.log(`\nSQS Functions:`);
+        for (const r of sqs.functions) {
+            const versionLabel = r.version ? `v${r.version}` : '';
+            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
+        }
+    }
+
+    // SQS Event Source Mappings
+    if (sqs && sqs.eventSources.length > 0) {
+        console.log(`\nSQS Event Sources:`);
+        for (const r of sqs.eventSources) {
+            if (r.action === 'skipped') {
+                console.log(`  ${r.name.padEnd(40)} skipped`);
+            } else {
+                const oldLabel = r.oldRemoved && r.oldRemoved > 0 ? `  ${r.oldRemoved} old removed` : '';
+                console.log(`  ${r.name.padEnd(40)} ${r.action}${oldLabel}`);
+            }
+        }
+    }
+
     // Twilio
     if (twilio) {
         console.log(`\nTwilio:`);
@@ -84,6 +107,20 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         const skipped = sns.subscriptions.filter(r => r.action === 'skipped').length;
         if (subscribed > 0 || skipped > 0) {
             parts.push(`${subscribed} topics subscribed${skipped > 0 ? `, ${skipped} skipped` : ''}`);
+        }
+    }
+    if (sqs) {
+        const created = sqs.eventSources.filter(r => r.action === 'created').length;
+        const updated = sqs.eventSources.filter(r => r.action === 'updated').length;
+        const exists = sqs.eventSources.filter(r => r.action === 'exists').length;
+        const skipped = sqs.eventSources.filter(r => r.action === 'skipped').length;
+        if (created + updated + exists + skipped > 0) {
+            const segs: string[] = [];
+            if (created > 0) segs.push(`${created} created`);
+            if (updated > 0) segs.push(`${updated} updated`);
+            if (exists > 0) segs.push(`${exists} existing`);
+            if (skipped > 0) segs.push(`${skipped} skipped`);
+            parts.push(`SQS: ${segs.join(', ')}`);
         }
     }
     if (twilio) {

@@ -6,6 +6,7 @@ import {
     VersionListItem,
     InfoStageEntry,
     InfoTopicResult,
+    InfoQueueResult,
     InfoTwilioResult,
     InfoGitHubResult,
     GitHubDeployment
@@ -110,9 +111,11 @@ async function main(): Promise<void> {
     console.log(`Collecting information for stages...`);
     const apis: ExportConfig[] = await cicd.getExportsByType('api');
     const topics: ExportConfig[] = await cicd.getExportsByType('sns');
+    const queues: ExportConfig[] = await cicd.getExportsByType('sqs');
     const topicFunctions: FunctionConfig[] = await cicd.getLambdaExports('sns');
     const apiFunctions: FunctionConfig[] = await cicd.getLambdaExports('api');
-    const functions = [...apiFunctions,...topicFunctions];
+    const queueFunctions: FunctionConfig[] = await cicd.getLambdaExports('sqs');
+    const functions = [...apiFunctions,...topicFunctions,...queueFunctions];
     const stagesInfo: Record<string, InfoStageEntry> = {};
     const funcAliases = new Map<string, AliasInfo[]>();
     const funcVersions = new Map<string, VersionListItem[]>();
@@ -189,6 +192,22 @@ async function main(): Promise<void> {
         topicResults.push({ name: topic.name, commit: commit || null });
     }
 
+    // Collect SQS queue results
+    const queueResults: InfoQueueResult[] = [];
+    for(const queue of queues) {
+        const mappings = await lambda.listEventSourceMappings(queue.value!);
+        let commit = '';
+        for(const m of mappings) {
+            const parts = m.functionArn.split(':');
+            if( parts.length === 8 ) {
+                commit = parts[7].split('-')[1];
+                logger.verbose(`   - Queue ${queue.name} mapped to alias '${parts[7]}'`);
+                break;
+            }
+        }
+        queueResults.push({ name: queue.name, commit: commit || null });
+    }
+
     // ── Print summary ─────────────────────────────────────────────────
 
     // Stages
@@ -217,6 +236,14 @@ async function main(): Promise<void> {
     if (topicResults.length > 0) {
         console.log(`\nSNS Topics:`);
         for (const r of topicResults) {
+            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
+        }
+    }
+
+    // SQS Queues
+    if (queueResults.length > 0) {
+        console.log(`\nSQS Queues:`);
+        for (const r of queueResults) {
             console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
         }
     }

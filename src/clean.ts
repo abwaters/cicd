@@ -1,4 +1,4 @@
-import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanFunctionResult, CleanEcrResult } from './types';
+import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanQueueResult, CleanFunctionResult, CleanEcrResult } from './types';
 
 import * as sns from './shared/sns';
 import * as lambda from './shared/lambda';
@@ -135,9 +135,11 @@ async function main(): Promise<void> {
     // get list of exports from cloudformation
     const apis: ExportConfig[] = await cicd.getExportsByType('api');
     const topics: ExportConfig[] = await cicd.getExportsByType('sns');
+    const queues: ExportConfig[] = await cicd.getExportsByType('sqs');
     const apiFunctions: FunctionConfig[] = await cicd.getLambdaExports('api');
     const snsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sns');
-    const functions = [...apiFunctions,...snsFunctions];
+    const sqsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sqs');
+    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions];
     let activeCommits = new Map<string, boolean>();
     let deletedDeployments=0,
         deletedAliases=0,
@@ -216,6 +218,26 @@ async function main(): Promise<void> {
         topicResults.push({ name: topic.name, commit: topicCommit });
     }
 
+    // ── Phase 2b: Scan SQS queue event source mappings ────────────────
+    const queueResults: CleanQueueResult[] = [];
+    for(const queue of queues) {
+        const mappings = await lambda.listEventSourceMappings(queue.value!);
+        let queueCommit: string | null = null;
+        for(const m of mappings) {
+            const parts = m.functionArn.split(':');
+            if (parts.length === 8) {
+                logger.verbose(`   - Lambda alias '${parts[7]}' active on ${queue.name}`);
+                activeCommits.set(parts[7], true);
+                queueCommit = parts[7];
+
+                if (!commitStages.has(parts[7])) {
+                    commitStages.set(parts[7], []);
+                }
+            }
+        }
+        queueResults.push({ name: queue.name, commit: queueCommit });
+    }
+
     // ── Phase 3: Clean Lambda aliases & versions ──────────────────────
     const functionResults: CleanFunctionResult[] = [];
     for(const f of functions) {
@@ -279,6 +301,14 @@ async function main(): Promise<void> {
     if (topicResults.length > 0) {
         console.log(`\nSNS Topics:`);
         for (const r of topicResults) {
+            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
+        }
+    }
+
+    // SQS Queues
+    if (queueResults.length > 0) {
+        console.log(`\nSQS Queues:`);
+        for (const r of queueResults) {
             console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
         }
     }

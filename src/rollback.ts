@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, TwilioDeployResult, FargateDeployResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, TwilioDeployResult, FargateDeployResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope, scopeLabel } from './shared/scope';
 
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
 
     // Determine scope
     const scope = resolveScope(o);
-    const { processEnv, processApi, processSns, processTwilio, apiFilter } = scope;
+    const { processEnv, processApi, processSns, processSqs, processTwilio, apiFilter } = scope;
     const dryRun = !!o.dryRun;
 
     // Display confirmation
@@ -198,6 +198,7 @@ async function main(): Promise<void> {
     let envResults: EnvResult[] | null = null;
     let apiResults: APIResult | null = null;
     let snsResults: SNSResult | null = null;
+    let sqsResults: SQSResult | null = null;
     let twilioResult: TwilioDeployResult | null = null;
 
     try {
@@ -213,6 +214,10 @@ async function main(): Promise<void> {
             snsResults = await cicd.processSNS(stage, appAlias, commit, dryRun);
         }
 
+        if (processSqs) {
+            sqsResults = await cicd.processSQS(stage, appAlias, commit, dryRun);
+        }
+
         if (processTwilio) {
             twilioResult = await cicd.processTwilio(stage, dryRun);
         }
@@ -225,7 +230,7 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
-    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, twilio: twilioResult });
+    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, twilio: twilioResult });
     console.log(`\nRollback complete: ${parts.join(', ')}`);
 
     // Verify rollback (skip in dry-run)
