@@ -13,6 +13,9 @@ import {
     SNSFunctionResult,
     SNSSubscriptionResult,
     SNSResult,
+    SQSFunctionResult,
+    SQSEventSourceResult,
+    SQSResult,
     TwilioDeployResult,
     VersionInfo,
     DeploymentInfo
@@ -378,7 +381,8 @@ async function getStageConfig(stage: string): Promise<StageConfig> {
 async function processFunctionEnvironmentVars(dryRun: boolean = false): Promise<EnvResult[]> {
     const apiFunctions =  await getLambdaExports('api');
     const snsFunctions =  await getLambdaExports('sns');
-    const functions = [...apiFunctions,...snsFunctions];
+    const sqsFunctions =  await getLambdaExports('sqs');
+    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions];
     const results: EnvResult[] = [];
     logger.verbose(`\n * Creating environment vars for functions:`);
     for(const f of functions) {
@@ -596,6 +600,104 @@ async function processSNS(stage: string, appAlias: string, commit: string, dryRu
     const functions = await processSNSFunctions(stage,appAlias,commit,dryRun);
     const subscriptions = await processSNSSubscriptions(stage,appAlias,commit,dryRun);
     return { functions, subscriptions };
+}
+
+async function processSQSFunctions(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SQSFunctionResult[]> {
+    const functions = await getLambdaExports('sqs');
+    const results: SQSFunctionResult[] = [];
+    logger.verbose(`\nCreating versions and aliases for functions:`);
+    for(const f of functions) {
+        logger.verbose(` * Checking function '${f.value}'...`);
+        const { action, version } = await processLambdaVersionAndAlias(f.value!, appAlias, commit, f.concurrency, dryRun);
+        results.push({ name: f.value!, action, version });
+    }
+    return results;
+}
+
+async function processSQSEventSources(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SQSEventSourceResult[]> {
+    const account = await getConfig("account");
+    const region = await getConfig("region");
+    const queues = await getExportsByType('sqs');
+    const results: SQSEventSourceResult[] = [];
+    logger.verbose(`\n * Updating SQS event source mappings:`);
+    for(const queue of queues) {
+
+        // checking sqs for stage
+        if( queue.hasOwnProperty('stages') ) {
+            if( !queue.stages!.includes(stageConfig!.stage) ) {
+                logger.verbose(`   - skipping '${queue.name}' in '${stageConfig!.stage}'`);
+                results.push({ name: queue.name, action: 'skipped' });
+                continue;
+            }
+        }
+
+        if (dryRun) {
+            for (const f of queue.functions) {
+                logger.verbose(`   - WOULD map '${f.value}' to SQS queue '${queue.name}'`);
+            }
+            results.push({ name: queue.name, action: 'created', oldRemoved: 0 });
+            continue;
+        }
+
+        let oldRemoved = 0;
+        let perQueueAction: 'created' | 'updated' | 'exists' = 'exists';
+        for(const f of queue.functions) {
+            const functionName = f.value!;
+            const functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
+            const desiredOpts = {
+                batchSize: f.batchSize,
+                maximumBatchingWindowInSeconds: f.maximumBatchingWindowInSeconds,
+                maximumConcurrency: f.maximumConcurrency
+            };
+
+            const mappings = await lambda.listEventSourceMappings(queue.value!);
+
+            // remove mappings that point at a different alias of this function
+            let currentMapping: typeof mappings[number] | undefined = undefined;
+            for(const m of mappings) {
+                const parts = m.functionArn.split(':');
+                const isThisFunction = parts.length >= 7 && parts[6] === functionName;
+                if (!isThisFunction) continue;
+                if (parts.length === 8 && parts[7] === appAlias) {
+                    currentMapping = m;
+                } else {
+                    logger.verbose(`   - deleting old event source mapping for '${functionName}' on SQS queue '${queue.name}'`);
+                    await lambda.deleteEventSourceMapping(m.uuid);
+                    oldRemoved++;
+                }
+            }
+
+            if (currentMapping) {
+                const drifted = (desiredOpts.batchSize !== undefined && currentMapping.batchSize !== desiredOpts.batchSize)
+                    || (desiredOpts.maximumBatchingWindowInSeconds !== undefined && currentMapping.maximumBatchingWindowInSeconds !== desiredOpts.maximumBatchingWindowInSeconds)
+                    || (desiredOpts.maximumConcurrency !== undefined && currentMapping.maximumConcurrency !== desiredOpts.maximumConcurrency);
+                if (drifted) {
+                    logger.verbose(`   - updating event source mapping for '${functionName}' on SQS queue '${queue.name}'`);
+                    await lambda.updateEventSourceMapping(currentMapping.uuid, desiredOpts);
+                    if (perQueueAction !== 'created') perQueueAction = 'updated';
+                } else {
+                    logger.verbose(`   - event source mapping already current for '${functionName}' on SQS queue '${queue.name}'`);
+                }
+            } else {
+                logger.verbose(`   - creating event source mapping for '${functionName}' on SQS queue '${queue.name}'`);
+                await lambda.createEventSourceMapping(queue.value!, functionArn, desiredOpts);
+                perQueueAction = 'created';
+            }
+        }
+        results.push({ name: queue.name, action: perQueueAction, oldRemoved });
+    }
+    return results;
+}
+
+async function processSQS(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SQSResult | null> {
+    const queues = await getExportsByType('sqs');
+    if (queues.length === 0) {
+        return null;
+    }
+    logger.verbose(`\nUpdating sqs queues:`);
+    const functions = await processSQSFunctions(stage,appAlias,commit,dryRun);
+    const eventSources = await processSQSEventSources(stage,appAlias,commit,dryRun);
+    return { functions, eventSources };
 }
 
 async function processTwilio(stage: string, dryRun: boolean = false): Promise<TwilioDeployResult | null> {
@@ -928,6 +1030,7 @@ export {
     processFunctionEnvironmentVars,
     processApiGateway,
     processSNS,
+    processSQS,
     processTwilio,
     processFargateDeploy,
     processFargateRestart,

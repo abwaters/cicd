@@ -27,7 +27,7 @@ export interface ThrottleSettings {
 }
 
 export interface ExportConfig {
-    type: 'api' | 'sns';
+    type: 'api' | 'sns' | 'sqs';
     name: string;
     path?: string;
     throttle?: ThrottleSettings;
@@ -41,6 +41,9 @@ export interface FunctionConfig {
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
     env?: string;
     concurrency?: number;
+    batchSize?: number;
+    maximumBatchingWindowInSeconds?: number;
+    maximumConcurrency?: number;
     value?: string; // resolved at runtime
 }
 
@@ -48,6 +51,16 @@ export interface SNSFunctionConfig {
     name: string;
     env?: string;
     concurrency?: number;
+    value?: string; // resolved at runtime
+}
+
+export interface SQSFunctionConfig {
+    name: string;
+    env?: string;
+    concurrency?: number;
+    batchSize?: number;
+    maximumBatchingWindowInSeconds?: number;
+    maximumConcurrency?: number;
     value?: string; // resolved at runtime
 }
 
@@ -82,6 +95,7 @@ export interface CLIOptions {
     env?: boolean;
     api?: boolean;
     sns?: boolean;
+    sqs?: boolean;
     apiFilter?: string;
     noTwilio?: boolean;
     dryRun?: boolean;
@@ -145,6 +159,24 @@ export interface SubscriptionInfo {
     endpoint: string;
 }
 
+// SQS / Lambda EventSourceMappings
+
+export interface EventSourceMappingInfo {
+    uuid: string;
+    functionArn: string;
+    eventSourceArn: string;
+    state?: string;
+    batchSize?: number;
+    maximumBatchingWindowInSeconds?: number;
+    maximumConcurrency?: number;
+}
+
+export interface EventSourceMappingOptions {
+    batchSize?: number;
+    maximumBatchingWindowInSeconds?: number;
+    maximumConcurrency?: number;
+}
+
 // CloudFormation
 
 export interface CFExport {
@@ -195,6 +227,23 @@ export interface SNSSubscriptionResult {
 export interface SNSResult {
     functions: SNSFunctionResult[];
     subscriptions: SNSSubscriptionResult[];
+}
+
+export interface SQSFunctionResult {
+    name: string;
+    action: 'created' | 'exists';
+    version: string;
+}
+
+export interface SQSEventSourceResult {
+    name: string;
+    action: 'created' | 'updated' | 'exists' | 'skipped';
+    oldRemoved?: number;
+}
+
+export interface SQSResult {
+    functions: SQSFunctionResult[];
+    eventSources: SQSEventSourceResult[];
 }
 
 // ─── Twilio Types ────────────────────────────────────────────────────────────
@@ -272,6 +321,11 @@ export interface InfoTopicResult {
     commit: string | null;
 }
 
+export interface InfoQueueResult {
+    name: string;
+    commit: string | null;
+}
+
 export interface InfoTwilioResult {
     stage: string;
     label: string;
@@ -314,6 +368,11 @@ export interface CleanApiResult {
 }
 
 export interface CleanTopicResult {
+    name: string;
+    commit: string | null;
+}
+
+export interface CleanQueueResult {
     name: string;
     commit: string | null;
 }

@@ -60,7 +60,7 @@ function showUsage(): void {
 
 Commands:
   deploy <stage> <commit>     Deploy a commit to a stage
-                              Options: --env, --api, --sns, --api-filter=<name>, --verbose
+                              Options: --env, --api, --sns, --sqs, --api-filter=<name>, --verbose
 
   clean                       Clean up unused API deployments, Lambda aliases/versions
                               Options: --verbose
@@ -69,7 +69,7 @@ Commands:
                               Options: --details, --verbose
 
   rollback <stage> [commit]   Rollback a stage to a previous deployment
-                              Options: --env, --api, --sns, --api-filter=<name>, --verbose
+                              Options: --env, --api, --sns, --sqs, --api-filter=<name>, --verbose
 
   restart <stage>             Force restart a Fargate service (fargate mode only)
                               Options: --no-wait, --verbose

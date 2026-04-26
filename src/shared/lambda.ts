@@ -13,10 +13,14 @@ import {
     DeleteProvisionedConcurrencyConfigCommand,
     AddPermissionCommand,
     FunctionConfiguration,
-    CreateAliasCommandOutput
+    CreateAliasCommandOutput,
+    ListEventSourceMappingsCommand,
+    CreateEventSourceMappingCommand,
+    UpdateEventSourceMappingCommand,
+    DeleteEventSourceMappingCommand
 } from "@aws-sdk/client-lambda";
 import * as crypto from 'crypto';
-import { VersionInfo, VersionListItem, AliasInfo } from '../types';
+import { VersionInfo, VersionListItem, AliasInfo, EventSourceMappingInfo, EventSourceMappingOptions } from '../types';
 
 import { getConfig } from './config';
 import { awsRetry } from './utils';
@@ -207,6 +211,87 @@ async function updateProvisionedConcurrency(functionName: string, aliasName: str
     }
 }
 
+async function listEventSourceMappings(eventSourceArn: string): Promise<EventSourceMappingInfo[]> {
+    const mappings: EventSourceMappingInfo[] = [];
+    try {
+        const lambdaClient = await getClient();
+        let marker: string | undefined = undefined;
+        do {
+            const command = new ListEventSourceMappingsCommand({
+                EventSourceArn: eventSourceArn,
+                Marker: marker
+            });
+            const response: any = await awsRetry(() => lambdaClient.send(command));
+            for (const m of (response.EventSourceMappings || [])) {
+                mappings.push({
+                    uuid: m.UUID!,
+                    functionArn: m.FunctionArn!,
+                    eventSourceArn: m.EventSourceArn!,
+                    state: m.State,
+                    batchSize: m.BatchSize,
+                    maximumBatchingWindowInSeconds: m.MaximumBatchingWindowInSeconds,
+                    maximumConcurrency: m.ScalingConfig?.MaximumConcurrency
+                });
+            }
+            marker = response.NextMarker;
+        } while (marker);
+    } catch (error) {
+        console.error("Error listing Lambda event source mappings:", error);
+    }
+    return mappings;
+}
+
+async function createEventSourceMapping(eventSourceArn: string, functionArn: string, opts: EventSourceMappingOptions = {}): Promise<string | null> {
+    try {
+        const command = new CreateEventSourceMappingCommand({
+            EventSourceArn: eventSourceArn,
+            FunctionName: functionArn,
+            Enabled: true,
+            BatchSize: opts.batchSize,
+            MaximumBatchingWindowInSeconds: opts.maximumBatchingWindowInSeconds,
+            ScalingConfig: opts.maximumConcurrency !== undefined
+                ? { MaximumConcurrency: opts.maximumConcurrency }
+                : undefined
+        });
+        const lambdaClient = await getClient();
+        const response = await awsRetry(() => lambdaClient.send(command));
+        return response.UUID || null;
+    } catch (error) {
+        console.error("Error creating Lambda event source mapping:", error);
+    }
+    return null;
+}
+
+async function updateEventSourceMapping(uuid: string, opts: EventSourceMappingOptions): Promise<void> {
+    try {
+        const command = new UpdateEventSourceMappingCommand({
+            UUID: uuid,
+            BatchSize: opts.batchSize,
+            MaximumBatchingWindowInSeconds: opts.maximumBatchingWindowInSeconds,
+            ScalingConfig: opts.maximumConcurrency !== undefined
+                ? { MaximumConcurrency: opts.maximumConcurrency }
+                : undefined
+        });
+        const lambdaClient = await getClient();
+        await awsRetry(() => lambdaClient.send(command));
+    } catch (error) {
+        console.error("Error updating Lambda event source mapping:", error);
+    }
+}
+
+async function deleteEventSourceMapping(uuid: string): Promise<void> {
+    try {
+        const command = new DeleteEventSourceMappingCommand({ UUID: uuid });
+        const lambdaClient = await getClient();
+        await awsRetry(() => lambdaClient.send(command));
+    } catch (error: any) {
+        if (error.name === 'ResourceNotFoundException') {
+            return;
+        }
+        console.error("Error deleting Lambda event source mapping:", error);
+    }
+}
+
 async function updateEnvironmentVariables(functionName: string, envVars: Record<string, string>): Promise<void> {
     try {
         const command = new UpdateFunctionConfigurationCommand({
@@ -233,5 +318,9 @@ export {
     createAlias,
     addFunctionPermission,
     updateProvisionedConcurrency,
-    updateEnvironmentVariables
+    updateEnvironmentVariables,
+    listEventSourceMappings,
+    createEventSourceMapping,
+    updateEventSourceMapping,
+    deleteEventSourceMapping
 };
