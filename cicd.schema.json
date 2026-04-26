@@ -131,6 +131,12 @@
                 "description": "Base path for API endpoints",
                 "minLength": 1
               },
+              "prefix": {
+                "type": "string",
+                "description": "Optional path prefix prepended to this API's path (e.g., 'admin' yields '/admin/{path}'). Used to group APIs under a shared URL segment via API Gateway base path mappings. May contain '/' for nested prefixes (e.g., 'internal/admin'). No leading or trailing slashes.",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._~!$&'()*+,;=:@-]+(/[A-Za-z0-9._~!$&'()*+,;=:@-]+)*$"
+              },
               "throttle": {
                 "type": "object",
                 "description": "API-specific throttle settings (overrides stage-level defaults)",

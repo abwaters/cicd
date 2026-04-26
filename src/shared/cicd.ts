@@ -307,6 +307,14 @@ async function findStages(apiId: string, stage: string): Promise<Stage | null> {
     return null;
 }
 
+function composeMappingPath(stageConfig: StageConfig, api: ExportConfig): string {
+    const segments: string[] = [];
+    if (stageConfig.mapping.path) segments.push(stageConfig.mapping.path);
+    if (api.prefix) segments.push(api.prefix);
+    if (api.path) segments.push(api.path);
+    return segments.join('/');
+}
+
 async function findMapping(domain: string, apiId: string, stage: string): Promise<BasePathMapping | null> {
     const mappings = await apigw.listBasePathMappings(domain);
     for(const m of mappings) {
@@ -428,10 +436,7 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
         const apiId = api.value!;
         logger.verbose(` * Checking api ${api.name} [${api.value}]...`);
         if (dryRun) {
-            let path = api.path;
-            if (localStageConfig.mapping.path) {
-                path = localStageConfig.mapping.path + "/" + path;
-            }
+            const path = composeMappingPath(localStageConfig, api);
             logger.verbose(`   - WOULD create deployment, update stage '${stage}', and map to ${localStageConfig.mapping.domain}/${path}`);
             results.push({ name: api.name, deployment: 'created', stage: 'created', mapping: 'created', throttle: 'dry-run', functions: api.functions.length });
             continue;
@@ -483,10 +488,7 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
             stageAction = 'created';
         }
 
-        let path = api.path || '';
-        if( localStageConfig.mapping.path ) {
-            path = localStageConfig.mapping.path + "/" + path;
-        }
+        const path = composeMappingPath(localStageConfig, api);
         let mappingAction: 'created' | 'existing' = 'existing';
         const m = await findMapping(localStageConfig.mapping.domain,apiId,stage);
         if( m ) {
@@ -722,13 +724,9 @@ async function processTwilio(stage: string, dryRun: boolean = false): Promise<Tw
         return null;
     }
 
-    // Build webhook URL: https://{domain}/{mapping.path}/{api.path}
-    const segments: string[] = [stageConfig.mapping.domain];
-    if (stageConfig.mapping.path) {
-        segments.push(stageConfig.mapping.path);
-    }
-    segments.push(apiExport.path!);
-    const webhookUrl = 'https://' + segments.join('/');
+    // Build webhook URL: https://{domain}/{mapping.path}/{api.prefix}/{api.path}
+    const mappingPath = composeMappingPath(stageConfig, apiExport);
+    const webhookUrl = 'https://' + stageConfig.mapping.domain + (mappingPath ? '/' + mappingPath : '');
 
     let sid = twilioConfig.messagingSid;
     if (sid.startsWith('!')) {
@@ -1026,6 +1024,7 @@ export {
     getExportsByType,
     getConfig,
     getVar,
+    composeMappingPath,
     validateRollbackTarget,
     processFunctionEnvironmentVars,
     processApiGateway,

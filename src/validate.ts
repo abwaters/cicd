@@ -6,6 +6,7 @@ import { CICDConfig, ThrottleSettings } from './types';
 import * as options from './shared/options';
 import * as logger from './shared/logger';
 import { printHeader } from './shared/header';
+import { composeMappingPath } from './shared/cicd';
 
 function semanticValidation(config: CICDConfig): string[] {
     const errors: string[] = [];
@@ -104,6 +105,26 @@ function semanticValidation(config: CICDConfig): string[] {
             }
             if (!stage.taskFamily) {
                 errors.push(`Fargate stage '${stage.stage}' is missing required 'taskFamily'`);
+            }
+        }
+    }
+
+    // Detect API mapping path collisions: two APIs that would resolve to the
+    // same final path on the same custom domain in the same stage cannot both
+    // be deployed (the second CreateApiMapping call fails at AWS).
+    const apiExports = (config.exports || []).filter(e => e.type === 'api');
+    for (const stage of config.stages || []) {
+        if (!stage.mapping) continue;
+        const seen = new Map<string, string>();
+        for (const api of apiExports) {
+            const composed = composeMappingPath(stage, api);
+            const key = `${stage.mapping.domain}|${composed}`;
+            if (seen.has(key)) {
+                errors.push(
+                    `Stage '${stage.stage}': APIs '${seen.get(key)}' and '${api.name}' both resolve to '${stage.mapping.domain}/${composed}'`
+                );
+            } else {
+                seen.set(key, api.name);
             }
         }
     }
