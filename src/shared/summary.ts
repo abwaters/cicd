@@ -90,7 +90,8 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         console.log(`\nWorkers:`);
         for (const r of workers.functions) {
             const versionLabel = r.version ? `v${r.version}` : '';
-            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
+            const commitLabel = r.commit ? `${r.commit}` : '';
+            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel.padEnd(8)} ${commitLabel}`);
         }
     }
 
@@ -135,11 +136,13 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
     }
     if (workers) {
         const created = workers.functions.filter(r => r.action === 'created').length;
+        const updated = workers.functions.filter(r => r.action === 'updated').length;
         const exists = workers.functions.filter(r => r.action === 'exists').length;
         const skipped = workers.functions.filter(r => r.action === 'skipped').length;
-        if (created + exists + skipped > 0) {
+        if (created + updated + exists + skipped > 0) {
             const segs: string[] = [];
             if (created > 0) segs.push(`${created} new`);
+            if (updated > 0) segs.push(`${updated} updated`);
             if (exists > 0) segs.push(`${exists} existing`);
             if (skipped > 0) segs.push(`${skipped} skipped`);
             parts.push(`Workers: ${segs.join(', ')}`);

@@ -311,6 +311,16 @@ async function findAlias(functionName: string, commit: string): Promise<string> 
     return '';
 }
 
+async function findAliasExact(functionName: string, aliasName: string): Promise<{ alias: string; version: string } | null> {
+    const aliases = await lambda.listAliases(functionName);
+    for(const alias of aliases) {
+        if( alias.alias === aliasName ) {
+            return { alias: alias.alias, version: alias.version };
+        }
+    }
+    return null;
+}
+
 async function findTag(functionName: string, commit: string): Promise<boolean> {
     const fc = await lambda.describeFunction(functionName);
     const tags = await lambda.listFunctionTags(fc!.FunctionArn!);
@@ -403,6 +413,53 @@ async function processLambdaVersionAndAlias(
         logger.verbose(`   - updating '${functionName}:${appAlias}' concurrency to ${concurrency}`);
     }
     return { action: 'created', version };
+}
+
+async function processWorkerVersionAndAlias(
+    stage: string,
+    commit: string,
+    functionName: string,
+    concurrency?: number,
+    dryRun: boolean = false
+): Promise<{ action: 'created' | 'updated' | 'exists'; version: string; commit: string }> {
+    if (dryRun) {
+        logger.verbose(`   - WOULD ensure stage alias '${stage}' points at version with commit '${commit}' for function '${functionName}'`);
+        if (concurrency !== undefined) {
+            logger.verbose(`   - WOULD set concurrency to ${concurrency}`);
+        }
+        return { action: 'created', version: '(dry-run)', commit };
+    }
+
+    let version = await findVersion(functionName, commit);
+    const existing = await findAliasExact(functionName, stage);
+
+    // Publish a new version if no version with this commit description exists yet.
+    if (!version) {
+        const v = await lambda.publishNewVersion(functionName, commit) as VersionInfo;
+        version = v.version;
+        logger.verbose(`   - published version ${version} for commit '${commit}'`);
+    }
+
+    let action: 'created' | 'updated' | 'exists';
+    if (!existing) {
+        await lambda.createAlias(functionName, stage, version);
+        logger.verbose(`   - created stage alias '${stage}' → version ${version} on '${functionName}'`);
+        action = 'created';
+    } else if (existing.version === version) {
+        logger.verbose(`   - stage alias '${stage}' already at version ${version} on '${functionName}'`);
+        action = 'exists';
+    } else {
+        await lambda.updateAlias(functionName, stage, version, commit);
+        logger.verbose(`   - re-pointed stage alias '${stage}' from version ${existing.version} → ${version} on '${functionName}'`);
+        action = 'updated';
+    }
+
+    if (concurrency !== undefined) {
+        await lambda.updateProvisionedConcurrency(functionName, stage, Number(concurrency));
+        logger.verbose(`   - applied concurrency ${concurrency} on '${functionName}:${stage}'`);
+    }
+
+    return { action, version, commit };
 }
 
 async function getStageConfig(stage: string): Promise<StageConfig> {
@@ -738,7 +795,7 @@ async function processSQS(stage: string, appAlias: string, commit: string, dryRu
     return { functions, eventSources };
 }
 
-async function processWorkers(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<WorkerResult | null> {
+async function processWorkers(stage: string, commit: string, dryRun: boolean = false): Promise<WorkerResult | null> {
     const workers = await getWorkers();
     if (workers.length === 0) {
         return null;
@@ -752,8 +809,8 @@ async function processWorkers(stage: string, appAlias: string, commit: string, d
             continue;
         }
         logger.verbose(` * Checking worker '${w.value}'...`);
-        const { action, version } = await processLambdaVersionAndAlias(w.value!, appAlias, commit, w.concurrency, dryRun);
-        results.push({ name: w.value!, action, version });
+        const { action, version, commit: resolvedCommit } = await processWorkerVersionAndAlias(stage, commit, w.value!, w.concurrency, dryRun);
+        results.push({ name: w.value!, action, version, commit: resolvedCommit });
     }
     return { functions: results };
 }
@@ -1058,19 +1115,33 @@ async function processFargateRestart(stage: string, noWait: boolean = false): Pr
     };
 }
 
-async function validateRollbackTarget(appAlias: string, stage?: string): Promise<{ valid: boolean; warnings: string[] }> {
+async function validateRollbackTarget(appAlias: string, stage?: string, commit?: string): Promise<{ valid: boolean; warnings: string[] }> {
     const warnings: string[] = [];
     const apiFunctions = await getLambdaExports('api');
     const snsFunctions = await getLambdaExports('sns');
     const sqsFunctions = await getLambdaExports('sqs');
-    const workers = await getWorkers(stage);
-    const allFunctions = [...apiFunctions, ...snsFunctions, ...sqsFunctions, ...workers];
+    const allFunctions = [...apiFunctions, ...snsFunctions, ...sqsFunctions];
 
     for (const f of allFunctions) {
         const functionName = f.value!;
         const alias = await findAlias(functionName, appAlias);
         if (!alias) {
             warnings.push(`Alias '${appAlias}' not found for ${functionName} — will create from $LATEST`);
+        }
+    }
+
+    // Workers use stage-as-alias semantics: a stage alias is created on first deploy and re-pointed
+    // thereafter. For rollback, the concern is whether a version with the target commit description
+    // still exists (it may have been pruned by `clean`). If missing, the deploy will publish a new
+    // version from $LATEST — which will NOT be the historical code at that commit.
+    if (stage && commit) {
+        const workers = await getWorkers(stage);
+        for (const w of workers) {
+            const functionName = w.value!;
+            const version = await findVersion(functionName, commit);
+            if (!version) {
+                warnings.push(`Worker '${functionName}': no version with commit '${commit}' found (likely pruned). Rollback will publish from $LATEST — NOT the historical code.`);
+            }
         }
     }
 
@@ -1084,6 +1155,8 @@ export {
     getConfig,
     getVar,
     composeMappingPath,
+    findAliasExact,
+    findVersion,
     validateRollbackTarget,
     processFunctionEnvironmentVars,
     processApiGateway,

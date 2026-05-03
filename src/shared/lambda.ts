@@ -4,6 +4,7 @@ import {
     ListAliasesCommand,
     DeleteAliasCommand,
     CreateAliasCommand,
+    UpdateAliasCommand,
     GetFunctionCommand,
     DeleteFunctionCommand,
     ListTagsCommand,
@@ -14,6 +15,7 @@ import {
     AddPermissionCommand,
     FunctionConfiguration,
     CreateAliasCommandOutput,
+    UpdateAliasCommandOutput,
     ListEventSourceMappingsCommand,
     CreateEventSourceMappingCommand,
     UpdateEventSourceMappingCommand,
@@ -127,6 +129,23 @@ async function createAlias(functionName: string, commit: string, functionVersion
         return response;
     } catch (error) {
         console.error("Error creating Lambda alias:", error);
+    }
+    return null;
+}
+
+async function updateAlias(functionName: string, aliasName: string, functionVersion: string, description?: string): Promise<UpdateAliasCommandOutput | null> {
+    try {
+        const command = new UpdateAliasCommand({
+            FunctionName: functionName,
+            Name: aliasName,
+            FunctionVersion: functionVersion,
+            Description: description
+        });
+        const lambdaClient = await getClient();
+        const response = await awsRetry(() => lambdaClient.send(command));
+        return response;
+    } catch (error) {
+        console.error("Error updating Lambda alias:", error);
     }
     return null;
 }
@@ -316,6 +335,7 @@ export {
     describeFunction,
     listFunctionTags,
     createAlias,
+    updateAlias,
     addFunctionPermission,
     updateProvisionedConcurrency,
     updateEnvironmentVariables,

@@ -210,17 +210,22 @@ async function main(): Promise<void> {
         queueResults.push({ name: queue.name, commit: commit || null });
     }
 
-    // Collect Worker results — list aliases per worker (no trigger to scan)
+    // Collect Worker results — workers use stage-as-alias semantics:
+    // alias name == stage name; the version it points at carries the commit in its description.
+    const stageNames = new Set(stages.map(s => s.stage));
     const workers: WorkerFunctionConfig[] = await cicd.getWorkers();
     const workerResults: InfoWorkerResult[] = [];
     for(const w of workers) {
         const aliases = await lambda.listAliases(w.value!);
+        const versions = await lambda.listVersions(w.value!);
+        const versionByNumber = new Map(versions.map(v => [v.version, v]));
         const commits: Record<string, string> = {};
         for(const a of aliases) {
-            // alias format is `{app}-{commit}` — strip app prefix
-            const parts = a.alias.split('-');
-            const commit = parts.length > 1 ? parts.slice(1).join('-') : a.alias;
-            commits[a.alias] = commit;
+            // Only show aliases that match a configured stage. Legacy `{app}-{commit}` aliases
+            // (created by the prior worker scheme) are stale and will be removed by `clean`.
+            if (!stageNames.has(a.alias)) continue;
+            const v = versionByNumber.get(a.version);
+            commits[a.alias] = (v?.description) || a.version;
         }
         workerResults.push({ name: w.value!, commits });
     }
@@ -272,7 +277,7 @@ async function main(): Promise<void> {
             const aliasList = Object.keys(r.commits);
             const label = aliasList.length === 0
                 ? 'none'
-                : aliasList.map(a => r.commits[a]).join(', ');
+                : aliasList.map(a => `${a}=${r.commits[a]}`).join(', ');
             console.log(`  ${r.name.padEnd(45)} ${label}`);
         }
     }

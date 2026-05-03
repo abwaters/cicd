@@ -117,7 +117,7 @@ async function main(): Promise<void> {
 
     // Safety check: verify rollback target aliases exist (Lambda mode only)
     if (computeMode !== 'fargate') {
-        const { valid, warnings } = await cicd.validateRollbackTarget(appAlias, stage);
+        const { valid, warnings } = await cicd.validateRollbackTarget(appAlias, stage, commit);
         if (!valid) {
             console.log(`\nWARNING: Some Lambda aliases for '${appAlias}' are missing:`);
             for (const w of warnings) {
@@ -220,7 +220,7 @@ async function main(): Promise<void> {
         }
 
         if (processWorkers) {
-            workerResults = await cicd.processWorkers(stage, appAlias, commit, dryRun);
+            workerResults = await cicd.processWorkers(stage, commit, dryRun);
         }
 
         if (processTwilio) {
@@ -240,7 +240,7 @@ async function main(): Promise<void> {
 
     // Verify rollback (skip in dry-run)
     if (!dryRun) {
-        const verifyResult = await verify.verifyDeployment(stage, appAlias);
+        const verifyResult = await verify.verifyDeployment(stage, appAlias, commit);
         verify.printVerificationResult(verifyResult);
     }
 

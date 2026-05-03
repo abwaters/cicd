@@ -259,8 +259,9 @@ export interface SQSResult {
 
 export interface WorkerFunctionResult {
     name: string;
-    action: 'created' | 'exists' | 'skipped';
+    action: 'created' | 'updated' | 'exists' | 'skipped';
     version: string;
+    commit?: string;
 }
 
 export interface WorkerResult {
@@ -405,7 +406,9 @@ export interface CleanQueueResult {
 
 export interface CleanWorkerResult {
     name: string;
-    activeCount: number;
+    aliasesRemoved: number;
+    versionsRemoved: number;
+    activeAliases: string[];
 }
 
 export interface CleanFunctionResult {
