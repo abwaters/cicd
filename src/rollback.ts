@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, TwilioDeployResult, FargateDeployResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope, scopeLabel } from './shared/scope';
 
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
 
     // Determine scope
     const scope = resolveScope(o);
-    const { processEnv, processApi, processSns, processSqs, processTwilio, apiFilter } = scope;
+    const { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, apiFilter } = scope;
     const dryRun = !!o.dryRun;
 
     // Display confirmation
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
 
     // Safety check: verify rollback target aliases exist (Lambda mode only)
     if (computeMode !== 'fargate') {
-        const { valid, warnings } = await cicd.validateRollbackTarget(appAlias);
+        const { valid, warnings } = await cicd.validateRollbackTarget(appAlias, stage);
         if (!valid) {
             console.log(`\nWARNING: Some Lambda aliases for '${appAlias}' are missing:`);
             for (const w of warnings) {
@@ -199,6 +199,7 @@ async function main(): Promise<void> {
     let apiResults: APIResult | null = null;
     let snsResults: SNSResult | null = null;
     let sqsResults: SQSResult | null = null;
+    let workerResults: WorkerResult | null = null;
     let twilioResult: TwilioDeployResult | null = null;
 
     try {
@@ -218,6 +219,10 @@ async function main(): Promise<void> {
             sqsResults = await cicd.processSQS(stage, appAlias, commit, dryRun);
         }
 
+        if (processWorkers) {
+            workerResults = await cicd.processWorkers(stage, appAlias, commit, dryRun);
+        }
+
         if (processTwilio) {
             twilioResult = await cicd.processTwilio(stage, dryRun);
         }
@@ -230,7 +235,7 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
-    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, twilio: twilioResult });
+    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult });
     console.log(`\nRollback complete: ${parts.join(', ')}`);
 
     // Verify rollback (skip in dry-run)

@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, TwilioDeployResult, FargateDeployResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope } from './shared/scope';
 
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    const { processEnv, processApi, processSns, processSqs, processTwilio, apiFilter } = resolveScope(o);
+    const { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, apiFilter } = resolveScope(o);
     const dryRun = !!o.dryRun;
 
     // TODO: formalize the cicd initialization...
@@ -113,6 +113,7 @@ async function main(): Promise<void> {
     let apiResults: APIResult | null = null;
     let snsResults: SNSResult | null = null;
     let sqsResults: SQSResult | null = null;
+    let workerResults: WorkerResult | null = null;
     let twilioResult: TwilioDeployResult | null = null;
 
     try {
@@ -132,6 +133,10 @@ async function main(): Promise<void> {
             sqsResults = await cicd.processSQS(stage,appAlias,commit,dryRun);
         }
 
+        if( processWorkers ) {
+            workerResults = await cicd.processWorkers(stage,appAlias,commit,dryRun);
+        }
+
         if( processTwilio ) {
             twilioResult = await cicd.processTwilio(stage,dryRun);
         }
@@ -145,7 +150,7 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
-    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, twilio: twilioResult });
+    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult });
     console.log(`\nSummary: ${parts.join(', ')}`);
 
     // Verify deployment (skip in dry-run)

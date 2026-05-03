@@ -2,11 +2,13 @@ import {
     StageConfig,
     ExportConfig,
     FunctionConfig,
+    WorkerFunctionConfig,
     AliasInfo,
     VersionListItem,
     InfoStageEntry,
     InfoTopicResult,
     InfoQueueResult,
+    InfoWorkerResult,
     InfoTwilioResult,
     InfoGitHubResult,
     GitHubDeployment
@@ -208,6 +210,21 @@ async function main(): Promise<void> {
         queueResults.push({ name: queue.name, commit: commit || null });
     }
 
+    // Collect Worker results — list aliases per worker (no trigger to scan)
+    const workers: WorkerFunctionConfig[] = await cicd.getWorkers();
+    const workerResults: InfoWorkerResult[] = [];
+    for(const w of workers) {
+        const aliases = await lambda.listAliases(w.value!);
+        const commits: Record<string, string> = {};
+        for(const a of aliases) {
+            // alias format is `{app}-{commit}` — strip app prefix
+            const parts = a.alias.split('-');
+            const commit = parts.length > 1 ? parts.slice(1).join('-') : a.alias;
+            commits[a.alias] = commit;
+        }
+        workerResults.push({ name: w.value!, commits });
+    }
+
     // ── Print summary ─────────────────────────────────────────────────
 
     // Stages
@@ -245,6 +262,18 @@ async function main(): Promise<void> {
         console.log(`\nSQS Queues:`);
         for (const r of queueResults) {
             console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
+        }
+    }
+
+    // Workers
+    if (workerResults.length > 0) {
+        console.log(`\nWorkers:`);
+        for (const r of workerResults) {
+            const aliasList = Object.keys(r.commits);
+            const label = aliasList.length === 0
+                ? 'none'
+                : aliasList.map(a => r.commits[a]).join(', ');
+            console.log(`  ${r.name.padEnd(45)} ${label}`);
         }
     }
 
