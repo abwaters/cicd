@@ -134,7 +134,7 @@ async function main(): Promise<void> {
         }
 
         if( processWorkers ) {
-            workerResults = await cicd.processWorkers(stage,appAlias,commit,dryRun);
+            workerResults = await cicd.processWorkers(stage,commit,dryRun);
         }
 
         if( processTwilio ) {
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
 
     // Verify deployment (skip in dry-run)
     if (!dryRun) {
-        const verifyResult = await verify.verifyDeployment(stage, appAlias);
+        const verifyResult = await verify.verifyDeployment(stage, appAlias, commit);
         verify.printVerificationResult(verifyResult);
     }
 

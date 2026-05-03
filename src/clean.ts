@@ -1,4 +1,4 @@
-import { ExportConfig, FunctionConfig, WorkerFunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanQueueResult, CleanFunctionResult, CleanEcrResult } from './types';
+import { ExportConfig, FunctionConfig, WorkerFunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanQueueResult, CleanFunctionResult, CleanWorkerResult, CleanEcrResult } from './types';
 
 import * as sns from './shared/sns';
 import * as lambda from './shared/lambda';
@@ -140,7 +140,10 @@ async function main(): Promise<void> {
     const snsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sns');
     const sqsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sqs');
     const workers: WorkerFunctionConfig[] = await cicd.getWorkers();
-    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions,...workers];
+    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions];
+    const stageList: StageConfig[] = await cicd.getConfig('stages');
+    const stageNames = new Set(stageList.map(s => s.stage));
+    const WORKER_VERSION_RETENTION = 5;
     let activeCommits = new Map<string, boolean>();
     let deletedDeployments=0,
         deletedAliases=0,
@@ -277,6 +280,55 @@ async function main(): Promise<void> {
         functionResults.push({ name: functionName, aliasesRemoved, versionsRemoved, activeCount });
     }
 
+    // ── Phase 4: Clean worker aliases & versions ──────────────────────
+    // Workers use stage-as-alias semantics. Aliases whose name is a configured stage are
+    // active; everything else (including legacy `{app}-{commit}` aliases from PR #178) is
+    // stale and removed. Versions stay if they are referenced by a stage alias OR fall
+    // within the most-recent N versions per worker (rollback retention floor).
+    const workerResults: CleanWorkerResult[] = [];
+    for (const w of workers) {
+        const functionName = w.value!;
+        const activeAliases: string[] = [];
+        const activeVersions = new Map<string, boolean>();
+        let aliasesRemoved = 0, versionsRemoved = 0;
+
+        const aliases = await lambda.listAliases(functionName);
+        for (const a of aliases) {
+            if (stageNames.has(a.alias)) {
+                logger.verbose(`   - Active worker alias '${a.alias}' on ${functionName}`);
+                activeVersions.set(a.version, true);
+                activeAliases.push(a.alias);
+            } else {
+                logger.verbose(`   - Deleted stale worker alias '${a.alias}' from ${functionName}`);
+                await lambda.deleteAlias(functionName, a.alias);
+                deletedAliases++;
+                aliasesRemoved++;
+            }
+        }
+
+        const versions = await lambda.listVersions(functionName);
+        const numericVersions = versions.filter(v => v.version !== '$LATEST');
+
+        // Retention floor: keep the most recent N versions (highest numeric version IDs)
+        // beyond what stage aliases pin. Gives rollback headroom when target version is
+        // not currently stage-pinned.
+        const sortedDescending = [...numericVersions].sort((a, b) => Number(b.version) - Number(a.version));
+        const retained = new Set<string>(sortedDescending.slice(0, WORKER_VERSION_RETENTION).map(v => v.version));
+
+        for (const v of numericVersions) {
+            if (activeVersions.has(v.version) || retained.has(v.version)) {
+                logger.verbose(`   - Keeping worker version '${v.version}' on ${functionName}`);
+            } else {
+                logger.verbose(`   - Deleted worker version '${v.version}' from ${functionName}`);
+                await lambda.deleteVersion(functionName, v.version);
+                deletedVersions++;
+                versionsRemoved++;
+            }
+        }
+
+        workerResults.push({ name: functionName, aliasesRemoved, versionsRemoved, activeAliases });
+    }
+
     // ── Print summary ─────────────────────────────────────────────────
 
     // Active commits
@@ -319,6 +371,15 @@ async function main(): Promise<void> {
         console.log(`\nLambda Functions:`);
         for (const r of functionResults) {
             console.log(`  ${r.name.padEnd(35)} ${String(r.aliasesRemoved).padStart(3)} aliases removed  ${String(r.versionsRemoved).padStart(3)} versions removed  ${r.activeCount} active`);
+        }
+    }
+
+    // Workers
+    if (workerResults.length > 0) {
+        console.log(`\nWorkers:`);
+        for (const r of workerResults) {
+            const activeLabel = r.activeAliases.length > 0 ? r.activeAliases.sort().join(', ') : 'none';
+            console.log(`  ${r.name.padEnd(35)} ${String(r.aliasesRemoved).padStart(3)} aliases removed  ${String(r.versionsRemoved).padStart(3)} versions removed  active: ${activeLabel}`);
         }
     }
 

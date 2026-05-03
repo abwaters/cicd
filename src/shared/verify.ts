@@ -17,7 +17,7 @@ export interface VerificationCheck {
     passed: boolean;
 }
 
-async function verifyDeployment(stage: string, appAlias: string): Promise<VerificationResult> {
+async function verifyDeployment(stage: string, appAlias: string, commit: string): Promise<VerificationResult> {
     const checks: VerificationCheck[] = [];
 
     // Verify API Gateway stage variables
@@ -37,8 +37,6 @@ async function verifyDeployment(stage: string, appAlias: string): Promise<Verifi
     }
 
     // Verify SNS subscriptions
-    const stageConfig = await cicd.getConfig('stages');
-    const currentStage = stageConfig.find((s: any) => s.stage === stage);
     const topics = await cicd.getExportsByType('sns');
     for (const topic of topics) {
         // Skip topics not configured for this stage
@@ -66,18 +64,25 @@ async function verifyDeployment(stage: string, appAlias: string): Promise<Verifi
         });
     }
 
-    // Verify worker aliases
+    // Verify worker stage aliases — alias name is the stage; the version it points at
+    // should have a description matching the deployed commit.
     const workers = await cicd.getWorkers(stage);
     for (const w of workers) {
-        const aliases = await lambda.listAliases(w.value!);
-        const found = aliases.find((a: any) => a.alias === appAlias);
-        const actual = found ? found.alias : '(no alias)';
+        const stageAlias = await cicd.findAliasExact(w.value!, stage);
+        let actual = '(no alias)';
+        let passed = false;
+        if (stageAlias) {
+            const versions = await lambda.listVersions(w.value!);
+            const v = versions.find(v => v.version === stageAlias.version);
+            actual = v?.description || stageAlias.version;
+            passed = !!v && v.description === commit;
+        }
         checks.push({
             type: 'worker',
             name: w.value!,
-            expected: appAlias,
+            expected: commit,
             actual,
-            passed: !!found
+            passed
         });
     }
 
