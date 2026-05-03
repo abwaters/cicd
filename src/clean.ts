@@ -1,4 +1,4 @@
-import { ExportConfig, FunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanQueueResult, CleanFunctionResult, CleanEcrResult } from './types';
+import { ExportConfig, FunctionConfig, WorkerFunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanQueueResult, CleanFunctionResult, CleanEcrResult } from './types';
 
 import * as sns from './shared/sns';
 import * as lambda from './shared/lambda';
@@ -139,7 +139,8 @@ async function main(): Promise<void> {
     const apiFunctions: FunctionConfig[] = await cicd.getLambdaExports('api');
     const snsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sns');
     const sqsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sqs');
-    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions];
+    const workers: WorkerFunctionConfig[] = await cicd.getWorkers();
+    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions,...workers];
     let activeCommits = new Map<string, boolean>();
     let deletedDeployments=0,
         deletedAliases=0,
