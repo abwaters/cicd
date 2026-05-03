@@ -107,6 +107,14 @@
       },
       "additionalProperties": false
     },
+    "workers": {
+      "type": "array",
+      "description": "Standalone Lambda functions that have no managed trigger (no API Gateway, SNS, or SQS binding). They receive stage env vars and are versioned with each deployment so they aren't cleaned up.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/workerFunctionConfig"
+      }
+    },
     "exports": {
       "type": "array",
       "description": "Array of API Gateway, SNS, and SQS resources to manage",
@@ -394,6 +402,37 @@
           "type": "integer",
           "description": "Reserved concurrent executions for this Lambda function (0 for throttling)",
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "workerFunctionConfig": {
+      "type": "object",
+      "description": "Standalone Lambda function configuration (no trigger wired by this tool)",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "CloudFormation export name for the Lambda function ARN",
+          "minLength": 1
+        },
+        "env": {
+          "type": "string",
+          "description": "Comma-separated list of environment variable names from global or stage environment",
+          "pattern": "^(@?[A-Za-z_][A-Za-z0-9_]*)(,@?[A-Za-z_][A-Za-z0-9_]*)*$"
+        },
+        "concurrency": {
+          "type": "integer",
+          "description": "Reserved concurrent executions for this Lambda function (0 for throttling)",
+          "minimum": 0
+        },
+        "stages": {
+          "type": "array",
+          "description": "Stages where this worker should be deployed (defaults to all stages)",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
         }
       },
       "additionalProperties": false

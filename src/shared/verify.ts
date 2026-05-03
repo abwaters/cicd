@@ -1,6 +1,7 @@
 import * as cicd from './cicd';
 import * as apigw from './apigw';
 import * as sns from './sns';
+import * as lambda from './lambda';
 import * as logger from './logger';
 
 export interface VerificationResult {
@@ -9,7 +10,7 @@ export interface VerificationResult {
 }
 
 export interface VerificationCheck {
-    type: 'api' | 'sns';
+    type: 'api' | 'sns' | 'worker';
     name: string;
     expected: string;
     actual: string;
@@ -65,6 +66,21 @@ async function verifyDeployment(stage: string, appAlias: string): Promise<Verifi
         });
     }
 
+    // Verify worker aliases
+    const workers = await cicd.getWorkers(stage);
+    for (const w of workers) {
+        const aliases = await lambda.listAliases(w.value!);
+        const found = aliases.find((a: any) => a.alias === appAlias);
+        const actual = found ? found.alias : '(no alias)';
+        checks.push({
+            type: 'worker',
+            name: w.value!,
+            expected: appAlias,
+            actual,
+            passed: !!found
+        });
+    }
+
     return {
         passed: checks.every(c => c.passed),
         checks
@@ -75,7 +91,7 @@ function printVerificationResult(result: VerificationResult): void {
     console.log(`\nDeployment Verification:`);
     for (const check of result.checks) {
         const icon = check.passed ? '✓' : '✗';
-        const label = check.type === 'api' ? 'API' : 'SNS';
+        const label = check.type === 'api' ? 'API' : check.type === 'sns' ? 'SNS' : 'WRK';
         if (check.passed) {
             console.log(`  ${icon} ${label} ${check.name.padEnd(35)} ${check.actual}`);
         } else {

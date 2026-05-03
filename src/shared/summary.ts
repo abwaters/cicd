@@ -1,10 +1,11 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, TwilioDeployResult } from '../types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult } from '../types';
 
 export interface DeploymentResults {
     env?: EnvResult[] | null;
     api?: APIResult | null;
     sns?: SNSResult | null;
     sqs?: SQSResult | null;
+    workers?: WorkerResult | null;
     twilio?: TwilioDeployResult | null;
 }
 
@@ -12,7 +13,7 @@ export interface DeploymentResults {
  * Prints detailed deployment/rollback results and returns a summary parts array.
  */
 export function printDeploymentSummary(results: DeploymentResults): string[] {
-    const { env, api, sns, sqs, twilio } = results;
+    const { env, api, sns, sqs, workers, twilio } = results;
 
     // Environment Variables
     if (env && env.length > 0) {
@@ -84,6 +85,15 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         }
     }
 
+    // Workers
+    if (workers && workers.functions.length > 0) {
+        console.log(`\nWorkers:`);
+        for (const r of workers.functions) {
+            const versionLabel = r.version ? `v${r.version}` : '';
+            console.log(`  ${r.name.padEnd(40)} ${r.action.padEnd(10)} ${versionLabel}`);
+        }
+    }
+
     // Twilio
     if (twilio) {
         console.log(`\nTwilio:`);
@@ -121,6 +131,18 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
             if (exists > 0) segs.push(`${exists} existing`);
             if (skipped > 0) segs.push(`${skipped} skipped`);
             parts.push(`SQS: ${segs.join(', ')}`);
+        }
+    }
+    if (workers) {
+        const created = workers.functions.filter(r => r.action === 'created').length;
+        const exists = workers.functions.filter(r => r.action === 'exists').length;
+        const skipped = workers.functions.filter(r => r.action === 'skipped').length;
+        if (created + exists + skipped > 0) {
+            const segs: string[] = [];
+            if (created > 0) segs.push(`${created} new`);
+            if (exists > 0) segs.push(`${exists} existing`);
+            if (skipped > 0) segs.push(`${skipped} skipped`);
+            parts.push(`Workers: ${segs.join(', ')}`);
         }
     }
     if (twilio) {

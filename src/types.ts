@@ -11,6 +11,7 @@ export interface CICDConfig {
     environmentGroups?: Record<string, string[]>;
     throttle?: ThrottleSettings;
     exports: ExportConfig[];
+    workers?: WorkerFunctionConfig[];
     stages: StageConfig[];
 }
 
@@ -65,6 +66,14 @@ export interface SQSFunctionConfig {
     value?: string; // resolved at runtime
 }
 
+export interface WorkerFunctionConfig {
+    name: string;
+    env?: string;
+    concurrency?: number;
+    stages?: string[];
+    value?: string; // resolved at runtime
+}
+
 export interface StageConfig {
     stage: string;
     mapping: StageMapping;
@@ -97,6 +106,7 @@ export interface CLIOptions {
     api?: boolean;
     sns?: boolean;
     sqs?: boolean;
+    workers?: boolean;
     apiFilter?: string;
     noTwilio?: boolean;
     dryRun?: boolean;
@@ -247,6 +257,16 @@ export interface SQSResult {
     eventSources: SQSEventSourceResult[];
 }
 
+export interface WorkerFunctionResult {
+    name: string;
+    action: 'created' | 'exists' | 'skipped';
+    version: string;
+}
+
+export interface WorkerResult {
+    functions: WorkerFunctionResult[];
+}
+
 // ─── Twilio Types ────────────────────────────────────────────────────────────
 
 export interface TwilioPhoneResult {
@@ -327,6 +347,11 @@ export interface InfoQueueResult {
     commit: string | null;
 }
 
+export interface InfoWorkerResult {
+    name: string;
+    commits: Record<string, string>; // stageOrLabel -> commit
+}
+
 export interface InfoTwilioResult {
     stage: string;
     label: string;
@@ -376,6 +401,11 @@ export interface CleanTopicResult {
 export interface CleanQueueResult {
     name: string;
     commit: string | null;
+}
+
+export interface CleanWorkerResult {
+    name: string;
+    activeCount: number;
 }
 
 export interface CleanFunctionResult {

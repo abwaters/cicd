@@ -1,6 +1,7 @@
 import {
     ExportConfig,
     FunctionConfig,
+    WorkerFunctionConfig,
     FargateConfig,
     FargateDeployResult,
     FargateRestartResult,
@@ -16,6 +17,8 @@ import {
     SQSFunctionResult,
     SQSEventSourceResult,
     SQSResult,
+    WorkerFunctionResult,
+    WorkerResult,
     TwilioDeployResult,
     VersionInfo,
     DeploymentInfo
@@ -36,6 +39,7 @@ import * as logger from './logger';
 const rawExports = new Map<string, string>();
 const exportMap = new Map<string, ExportConfig>();
 const functionMap = new Map<string, FunctionConfig>();
+const workerMap = new Map<string, WorkerFunctionConfig>();
 let envCache: Map<string, string> | null = null;
 const psCache = new Map<string, string>();
 let stageConfig: StageConfig | null = null;
@@ -170,6 +174,11 @@ async function initExports(): Promise<void> {
             }
         }
 
+        const workerConfigs: WorkerFunctionConfig[] = (await getConfig('workers')) || [];
+        for(const w of workerConfigs) {
+            workerMap.set(w.name,w);
+        }
+
         // get exports and load them
         const response = await cf.listExports();
         for(const e of (response || [])) {
@@ -178,6 +187,9 @@ async function initExports(): Promise<void> {
                 cfg.value = e.Value;
             }else if( functionMap.has(e.Name!) ) {
                 const cfg = functionMap.get(e.Name!)!;
+                cfg.value = e.Value;
+            }else if( workerMap.has(e.Name!) ) {
+                const cfg = workerMap.get(e.Name!)!;
                 cfg.value = e.Value;
             }
             rawExports.set(e.Name!,e.Value!);
@@ -193,6 +205,13 @@ async function initExports(): Promise<void> {
         }
 
         for(const cfg of functionMap.values()) {
+            if( !cfg.hasOwnProperty('value') ) {
+                console.log(`ERROR: could not find export for '${cfg.name}'.`);
+                cnt++;
+            }
+        }
+
+        for(const cfg of workerMap.values()) {
             if( !cfg.hasOwnProperty('value') ) {
                 console.log(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
@@ -218,6 +237,13 @@ async function initExports(): Promise<void> {
             }
         }
 
+        for(const w of workerConfigs) {
+            if( !w.value ) {
+                const entry = workerMap.get(w.name)!;
+                w.value = entry.value;
+            }
+        }
+
     }catch(e) {
         throw new Error(`Failed to initialize exports: ${e instanceof Error ? e.message : e}`);
     }
@@ -240,6 +266,15 @@ async function getExportsByType(type: string, filter?: string): Promise<ExportCo
         const exports = [...exportMap.values()];
         return exports.filter( resource => resource.type === type);
     }
+}
+
+async function getWorkers(stage?: string): Promise<WorkerFunctionConfig[]> {
+    await init();
+    const workers = [...workerMap.values()];
+    if (stage) {
+        return workers.filter(w => !w.stages || w.stages.includes(stage));
+    }
+    return workers;
 }
 
 async function getLambdaExports(type: string, filter?: string): Promise<FunctionConfig[]> {
@@ -390,7 +425,8 @@ async function processFunctionEnvironmentVars(dryRun: boolean = false): Promise<
     const apiFunctions =  await getLambdaExports('api');
     const snsFunctions =  await getLambdaExports('sns');
     const sqsFunctions =  await getLambdaExports('sqs');
-    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions];
+    const workerFunctions = await getWorkers(stageConfig?.stage);
+    const functions = [...apiFunctions,...snsFunctions,...sqsFunctions,...workerFunctions];
     const results: EnvResult[] = [];
     logger.verbose(`\n * Creating environment vars for functions:`);
     for(const f of functions) {
@@ -702,6 +738,26 @@ async function processSQS(stage: string, appAlias: string, commit: string, dryRu
     return { functions, eventSources };
 }
 
+async function processWorkers(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<WorkerResult | null> {
+    const workers = await getWorkers();
+    if (workers.length === 0) {
+        return null;
+    }
+    logger.verbose(`\nUpdating workers:`);
+    const results: WorkerFunctionResult[] = [];
+    for (const w of workers) {
+        if (w.stages && !w.stages.includes(stage)) {
+            logger.verbose(`   - skipping worker '${w.name}' in '${stage}'`);
+            results.push({ name: w.value || w.name, action: 'skipped', version: '' });
+            continue;
+        }
+        logger.verbose(` * Checking worker '${w.value}'...`);
+        const { action, version } = await processLambdaVersionAndAlias(w.value!, appAlias, commit, w.concurrency, dryRun);
+        results.push({ name: w.value!, action, version });
+    }
+    return { functions: results };
+}
+
 async function processTwilio(stage: string, dryRun: boolean = false): Promise<TwilioDeployResult | null> {
     if (!stageConfig || !stageConfig.twilio) {
         return null;
@@ -1002,11 +1058,13 @@ async function processFargateRestart(stage: string, noWait: boolean = false): Pr
     };
 }
 
-async function validateRollbackTarget(appAlias: string): Promise<{ valid: boolean; warnings: string[] }> {
+async function validateRollbackTarget(appAlias: string, stage?: string): Promise<{ valid: boolean; warnings: string[] }> {
     const warnings: string[] = [];
     const apiFunctions = await getLambdaExports('api');
     const snsFunctions = await getLambdaExports('sns');
-    const allFunctions = [...apiFunctions, ...snsFunctions];
+    const sqsFunctions = await getLambdaExports('sqs');
+    const workers = await getWorkers(stage);
+    const allFunctions = [...apiFunctions, ...snsFunctions, ...sqsFunctions, ...workers];
 
     for (const f of allFunctions) {
         const functionName = f.value!;
@@ -1022,6 +1080,7 @@ async function validateRollbackTarget(appAlias: string): Promise<{ valid: boolea
 export {
     getLambdaExports,
     getExportsByType,
+    getWorkers,
     getConfig,
     getVar,
     composeMappingPath,
@@ -1030,6 +1089,7 @@ export {
     processApiGateway,
     processSNS,
     processSQS,
+    processWorkers,
     processTwilio,
     processFargateDeploy,
     processFargateRestart,

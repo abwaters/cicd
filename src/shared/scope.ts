@@ -5,6 +5,7 @@ export interface DeployScope {
     processApi: boolean;
     processSns: boolean;
     processSqs: boolean;
+    processWorkers: boolean;
     processTwilio: boolean;
     apiFilter: string;
 }
@@ -14,6 +15,7 @@ export function resolveScope(o: CLIOptions): DeployScope {
     let processApi = true;
     let processSns = true;
     let processSqs = true;
+    let processWorkers = true;
     let processTwilio = true;
 
     if (o.env) {
@@ -21,11 +23,13 @@ export function resolveScope(o: CLIOptions): DeployScope {
         processApi = false;
         processSns = false;
         processSqs = false;
+        processWorkers = false;
         processTwilio = false;
-    } else if (o.api || o.sns || o.sqs) {
+    } else if (o.api || o.sns || o.sqs || o.workers) {
         processApi = !!o.api;
         processSns = !!o.sns;
         processSqs = !!o.sqs;
+        processWorkers = !!o.workers;
         processTwilio = false;
     }
 
@@ -33,7 +37,7 @@ export function resolveScope(o: CLIOptions): DeployScope {
         processTwilio = false;
     }
 
-    if (processApi || processSns || processSqs) {
+    if (processApi || processSns || processSqs || processWorkers) {
         processEnv = true;
     }
 
@@ -42,17 +46,18 @@ export function resolveScope(o: CLIOptions): DeployScope {
         apiFilter = o.apiFilter as string;
     }
 
-    return { processEnv, processApi, processSns, processSqs, processTwilio, apiFilter };
+    return { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, apiFilter };
 }
 
 export function scopeLabel(scope: DeployScope): string {
     const parts: string[] = [];
-    if (scope.processEnv && !scope.processApi && !scope.processSns && !scope.processSqs) {
+    if (scope.processEnv && !scope.processApi && !scope.processSns && !scope.processSqs && !scope.processWorkers) {
         parts.push('Environment only');
     } else {
         if (scope.processApi) parts.push(scope.apiFilter ? `API (${scope.apiFilter})` : 'API');
         if (scope.processSns) parts.push('SNS');
         if (scope.processSqs) parts.push('SQS');
+        if (scope.processWorkers) parts.push('Workers');
         if (scope.processTwilio) parts.push('Twilio');
         if (parts.length === 0) parts.push('Environment only');
         else parts.unshift('Environment');
