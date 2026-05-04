@@ -73,6 +73,40 @@ async function awsRetry<T>(operation: () => Promise<T>, maxRetries?: number): Pr
     throw new Error('Max retries exceeded');
 }
 
+const NETWORK_ERROR_CODES = new Set([
+    'ENOTFOUND',      // DNS resolution failed
+    'EAI_AGAIN',      // DNS temporarily unavailable
+    'ETIMEDOUT',      // connection timed out
+    'ECONNREFUSED',   // connection refused
+    'ECONNRESET',     // connection reset by peer
+    'ENETUNREACH',    // network unreachable
+    'EHOSTUNREACH',   // host unreachable
+    'EPIPE'           // broken pipe
+]);
+
+function isNetworkError(error: unknown): boolean {
+    if (!error) return false;
+    const err = error as AWSError & { syscall?: string };
+    if (err.code && NETWORK_ERROR_CODES.has(err.code)) return true;
+    // AWS SDK sometimes wraps the cause
+    const cause = (err as any).cause;
+    if (cause && cause.code && NETWORK_ERROR_CODES.has(cause.code)) return true;
+    return false;
+}
+
+function describeNetworkError(error: unknown): string {
+    const err = error as AWSError & { hostname?: string; syscall?: string };
+    const cause = (err as any).cause;
+    const code = err.code || (cause && cause.code) || 'unknown';
+    const hostname = err.hostname || (cause && cause.hostname);
+    const attempts = err.$metadata && (err.$metadata as any).attempts;
+    const parts: string[] = [`Network error (${code})`];
+    if (hostname) parts.push(`could not reach ${hostname}`);
+    if (attempts) parts.push(`after ${attempts} attempt${attempts === 1 ? '' : 's'}`);
+    parts.push('— check your internet connection or VPN and retry');
+    return parts.join(' ');
+}
+
 function formatDuration(totalSeconds: number): string {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -87,4 +121,4 @@ function formatDuration(totalSeconds: number): string {
     return `${seconds}s`;
 }
 
-export { sleep, awsRetry, isThrottleError, formatDuration };
+export { sleep, awsRetry, isThrottleError, isNetworkError, describeNetworkError, formatDuration };
