@@ -8,6 +8,7 @@ import * as options from './shared/options';
 import * as credentials from './shared/credentials';
 import * as logger from './shared/logger';
 import * as github from './shared/github';
+import { isNetworkError, describeNetworkError } from './shared/utils';
 import { printHeader } from './shared/header';
 
 async function main(): Promise<void> {
@@ -168,4 +169,11 @@ async function main(): Promise<void> {
     console.timeEnd("api cicd");
 }
 
-main();
+main().catch(err => {
+    if (isNetworkError(err)) {
+        console.error(`\nDeployment failed: ${describeNetworkError(err)}`);
+    } else {
+        console.error(`\nDeployment failed: ${err.message || err}`);
+    }
+    process.exit(1);
+});
