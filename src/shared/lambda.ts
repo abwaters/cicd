@@ -37,19 +37,14 @@ async function getClient(): Promise<LambdaClient> {
     return client;
 }
 
-async function publishNewVersion(functionName: string, commit: string): Promise<VersionInfo | ''> {
-    try {
-        const command = new PublishVersionCommand({
-            FunctionName: functionName,
-            Description: commit
-        });
-        const lambdaClient = await getClient();
-        const response = await awsRetry(() => lambdaClient.send(command));
-        return {version: response.Version!, description: response.Description!, arn: response.FunctionArn!};
-    } catch (error) {
-        console.error("Error publishing Lambda version:", error);
-    }
-    return '';
+async function publishNewVersion(functionName: string, commit: string): Promise<VersionInfo> {
+    const command = new PublishVersionCommand({
+        FunctionName: functionName,
+        Description: commit
+    });
+    const lambdaClient = await getClient();
+    const response = await awsRetry(() => lambdaClient.send(command));
+    return {version: response.Version!, description: response.Description!, arn: response.FunctionArn!};
 }
 
 async function listVersions(functionName: string): Promise<VersionListItem[]> {
