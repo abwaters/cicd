@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope } from './shared/scope';
 
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    const { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, apiFilter } = resolveScope(o);
+    const { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, processWeb, apiFilter, webFilter } = resolveScope(o);
     const dryRun = !!o.dryRun;
 
     // TODO: formalize the cicd initialization...
@@ -116,6 +116,7 @@ async function main(): Promise<void> {
     let sqsResults: SQSResult | null = null;
     let workerResults: WorkerResult | null = null;
     let twilioResult: TwilioDeployResult | null = null;
+    let webResults: WebResult | null = null;
 
     try {
         if( processEnv ) {
@@ -138,6 +139,10 @@ async function main(): Promise<void> {
             workerResults = await cicd.processWorkers(stage,commit,dryRun);
         }
 
+        if( processWeb ) {
+            webResults = await cicd.processWeb(stage,appAlias,commit,webFilter,dryRun);
+        }
+
         if( processTwilio ) {
             twilioResult = await cicd.processTwilio(stage,dryRun);
         }
@@ -151,7 +156,7 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
-    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult });
+    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult, web: webResults });
     console.log(`\nSummary: ${parts.join(', ')}`);
 
     // Verify deployment (skip in dry-run)

@@ -20,6 +20,8 @@ import {
     WorkerFunctionResult,
     WorkerResult,
     TwilioDeployResult,
+    WebExportResult,
+    WebResult,
     VersionInfo,
     DeploymentInfo
 } from '../types';
@@ -32,7 +34,10 @@ import * as sns from './sns';
 import * as twilio from './twilio';
 import * as ecs from './ecs';
 import * as cf from './cloudformation';
+import * as s3 from './s3';
+import * as cloudfront from './cloudfront';
 import * as ps from './ps';
+import * as path from 'path';
 import { getConfig } from './config';
 import * as logger from './logger';
 
@@ -242,6 +247,23 @@ async function initExports(): Promise<void> {
                 const entry = workerMap.get(w.name)!;
                 w.value = entry.value;
             }
+        }
+
+        // Resolve web exports' distribution CFN export to the CloudFront distribution ID.
+        // Web exports carry two CFN export references: `name` (S3 bucket, resolved via the
+        // standard exportMap path) and `distribution` (CloudFront distribution ID, resolved here).
+        let webMissing = 0;
+        for(const cfg of exportConfigs) {
+            if (cfg.type !== 'web' || !cfg.distribution) continue;
+            if (rawExports.has(cfg.distribution)) {
+                cfg.distributionValue = rawExports.get(cfg.distribution);
+            } else {
+                console.log(`ERROR: could not find export for web distribution '${cfg.distribution}'.`);
+                webMissing++;
+            }
+        }
+        if (webMissing) {
+            throw new Error(`${webMissing} web distribution export(s) could not be resolved — see errors above`);
         }
 
     }catch(e) {
@@ -795,6 +817,80 @@ async function processSQS(stage: string, appAlias: string, commit: string, dryRu
     return { functions, eventSources };
 }
 
+const NOINDEX_ROBOTS_BODY = 'User-agent: *\nDisallow: /\n';
+const NOCACHE = 'no-cache, no-store, must-revalidate';
+
+async function processWeb(stage: string, appAlias: string, commit: string, webFilter?: string, dryRun: boolean = false): Promise<WebResult | null> {
+    const all = await getExportsByType('web', webFilter);
+    if (all.length === 0) {
+        return null;
+    }
+    logger.verbose(`\nUpdating web deployments:`);
+
+    const exports: WebExportResult[] = [];
+    for (const cfg of all) {
+        if (cfg.stages && !cfg.stages.includes(stage)) {
+            logger.verbose(`   - skipping web '${cfg.name}' in '${stage}' (not in stages list)`);
+            continue;
+        }
+
+        const bucket = cfg.value!;
+        const distribution = cfg.distributionValue!;
+        const source = path.resolve(process.cwd(), cfg.source ?? './dist');
+        const keyPrefix = `${stage}/${commit}`;
+        const originPath = `/${stage}/${commit}`;
+        const noindex = !!(cfg.noindexStages && cfg.noindexStages.includes(stage));
+
+        logger.verbose(` * Web '${cfg.name}' → s3://${bucket}/${keyPrefix}/  (distribution ${distribution})`);
+
+        if (dryRun) {
+            logger.verbose(`   - WOULD upload '${source}' to s3://${bucket}/${keyPrefix}/`);
+            if (noindex) {
+                logger.verbose(`   - WOULD inject Disallow:/ robots.txt for noindex stage '${stage}'`);
+            }
+            logger.verbose(`   - WOULD set CloudFront origin '${stage}' OriginPath to '${originPath}'`);
+            logger.verbose(`   - WOULD invalidate /* on distribution '${distribution}'`);
+            exports.push({
+                name: cfg.name,
+                bucket,
+                distribution,
+                originPath,
+                fileCount: 0,
+                totalBytes: 0,
+                noindexInjected: noindex
+            });
+            continue;
+        }
+
+        const { fileCount, totalBytes } = await s3.uploadDirectory(bucket, keyPrefix, source);
+        logger.verbose(`   - uploaded ${fileCount} files (${totalBytes} bytes)`);
+
+        if (noindex) {
+            await s3.putObject(bucket, `${keyPrefix}/robots.txt`, NOINDEX_ROBOTS_BODY, 'text/plain; charset=utf-8', NOCACHE);
+            logger.verbose(`   - injected Disallow:/ robots.txt for noindex stage '${stage}'`);
+        }
+
+        await cloudfront.updateOriginPath(distribution, stage, originPath);
+        logger.verbose(`   - CloudFront origin '${stage}' OriginPath = '${originPath}'`);
+
+        const invalidationId = await cloudfront.createInvalidation(distribution, ['/*']);
+        logger.verbose(`   - invalidation '${invalidationId}' created`);
+
+        exports.push({
+            name: cfg.name,
+            bucket,
+            distribution,
+            originPath,
+            invalidationId,
+            fileCount,
+            totalBytes,
+            noindexInjected: noindex
+        });
+    }
+
+    return { exports };
+}
+
 async function processWorkers(stage: string, commit: string, dryRun: boolean = false): Promise<WorkerResult | null> {
     const workers = await getWorkers();
     if (workers.length === 0) {
@@ -1162,6 +1258,7 @@ export {
     processApiGateway,
     processSNS,
     processSQS,
+    processWeb,
     processWorkers,
     processTwilio,
     processFargateDeploy,

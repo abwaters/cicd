@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult } from '../types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, WebResult } from '../types';
 
 export interface DeploymentResults {
     env?: EnvResult[] | null;
@@ -7,13 +7,14 @@ export interface DeploymentResults {
     sqs?: SQSResult | null;
     workers?: WorkerResult | null;
     twilio?: TwilioDeployResult | null;
+    web?: WebResult | null;
 }
 
 /**
  * Prints detailed deployment/rollback results and returns a summary parts array.
  */
 export function printDeploymentSummary(results: DeploymentResults): string[] {
-    const { env, api, sns, sqs, workers, twilio } = results;
+    const { env, api, sns, sqs, workers, twilio, web } = results;
 
     // Environment Variables
     if (env && env.length > 0) {
@@ -95,6 +96,16 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         }
     }
 
+    // Web (S3 + CloudFront)
+    if (web && web.exports.length > 0) {
+        console.log(`\nWeb:`);
+        for (const r of web.exports) {
+            const noindex = r.noindexInjected ? ' [noindex]' : '';
+            const inv = r.invalidationId ? `inv ${r.invalidationId}` : '';
+            console.log(`  ${r.name.padEnd(30)} ${r.bucket.padEnd(30)} ${r.originPath.padEnd(20)} ${r.fileCount} files, ${r.totalBytes} bytes${noindex} ${inv}`);
+        }
+    }
+
     // Twilio
     if (twilio) {
         console.log(`\nTwilio:`);
@@ -147,6 +158,10 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
             if (skipped > 0) segs.push(`${skipped} skipped`);
             parts.push(`Workers: ${segs.join(', ')}`);
         }
+    }
+    if (web && web.exports.length > 0) {
+        const totalFiles = web.exports.reduce((acc, r) => acc + r.fileCount, 0);
+        parts.push(`${web.exports.length} web export(s) deployed (${totalFiles} files)`);
     }
     if (twilio) {
         parts.push(`Twilio webhook ${twilio.action}`);

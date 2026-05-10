@@ -111,7 +111,9 @@ export interface CLIOptions {
     sns?: boolean;
     sqs?: boolean;
     workers?: boolean;
+    web?: boolean;
     apiFilter?: string;
+    webFilter?: string;
     noTwilio?: boolean;
     dryRun?: boolean;
     details?: boolean;
