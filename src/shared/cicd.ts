@@ -314,10 +314,10 @@ async function getLambdaExports(type: string, filter?: string): Promise<Function
     return [...Object.values(expFunctions)];
 }
 
-async function findVersion(functionName: string, commit: string): Promise<string> {
+async function findVersion(functionName: string, description: string): Promise<string> {
     const versions = await lambda.listVersions(functionName);
     for(const version of versions) {
-        if( version.description.includes(commit) ) {
+        if( version.description === description ) {
             return version.version;
         }
     }
@@ -441,7 +441,7 @@ async function processLambdaVersionAndAlias(
         return { action: 'created', version: '(dry-run)' };
     }
 
-    let version = await findVersion(functionName, commit);
+    let version = await findVersion(functionName, appAlias);
     let alias = await findAlias(functionName, appAlias);
     if (alias) {
         logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
