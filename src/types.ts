@@ -219,7 +219,7 @@ export interface APIDeploymentResult {
     name: string;
     deployment: 'created' | 'existing';
     stage: 'created' | 'updated';
-    mapping: 'created' | 'existing';
+    mapping: 'created' | 'existing' | 'moved';
     throttle: string;
     functions: number;
 }

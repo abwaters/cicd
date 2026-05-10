@@ -25,7 +25,7 @@ import {
     VersionInfo,
     DeploymentInfo
 } from '../types';
-import { Deployment, Stage, BasePathMapping } from '@aws-sdk/client-api-gateway';
+import { Deployment, Stage } from '@aws-sdk/client-api-gateway';
 import { ContainerDefinition } from '@aws-sdk/client-ecs';
 
 import * as lambda from './lambda';
@@ -383,14 +383,47 @@ function composeMappingPath(stageConfig: StageConfig, api: ExportConfig): string
     return segments.join('/');
 }
 
-async function findMapping(domain: string, apiId: string, stage: string): Promise<BasePathMapping | null> {
-    const mappings = await apigw.listBasePathMappings(domain);
-    for(const m of mappings) {
-        if( m.restApiId === apiId && m.stage === stage ) {
-            return m;
+interface BasePathMappingLite {
+    basePath?: string;
+    restApiId?: string;
+    stage?: string;
+}
+
+type MappingDecision =
+    | { action: 'existing' }
+    | { action: 'create' }
+    | { action: 'move'; from: string }
+    | { action: 'conflict'; conflictApiId: string; conflictStage: string };
+
+function normalizeBasePath(bp: string | undefined): string {
+    if (!bp || bp === '(none)') return '';
+    return bp;
+}
+
+function decideMappingAction(
+    allMappings: BasePathMappingLite[],
+    apiId: string,
+    stage: string,
+    desiredPath: string
+): MappingDecision {
+    const existing = allMappings.find(m => m.restApiId === apiId && m.stage === stage);
+    if (existing) {
+        const existingPath = normalizeBasePath(existing.basePath);
+        if (existingPath === desiredPath) return { action: 'existing' };
+        const conflict = allMappings.find(m =>
+            normalizeBasePath(m.basePath) === desiredPath &&
+            (m.restApiId !== apiId || m.stage !== stage)
+        );
+        if (conflict) {
+            return { action: 'conflict', conflictApiId: conflict.restApiId!, conflictStage: conflict.stage! };
         }
+        return { action: 'move', from: existingPath };
     }
-    return null;
+    const conflict = allMappings.find(m => normalizeBasePath(m.basePath) === desiredPath);
+    if (conflict) {
+        return { action: 'conflict', conflictApiId: conflict.restApiId!, conflictStage: conflict.stage! };
+    }
+    return { action: 'create' };
 }
 
 async function processLambdaVersionAndAlias(
@@ -605,17 +638,29 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
         }
 
         const path = composeMappingPath(localStageConfig, api);
-        let mappingAction: 'created' | 'existing' = 'existing';
-        const m = await findMapping(localStageConfig.mapping.domain,apiId,stage);
-        if( m ) {
-            logger.verbose(`   - using existing mapping for ${localStageConfig.mapping.domain} with path '${path}'`);
-        }else{
-            logger.verbose(`   - create mapping for ${localStageConfig.mapping.domain} with path '${path}'`);
+        const domain = localStageConfig.mapping.domain;
+        const allMappings = await apigw.listBasePathMappings(domain);
+        const decision = decideMappingAction(allMappings, apiId, stage, path);
+        let mappingAction: 'created' | 'existing' | 'moved' = 'existing';
+        if (decision.action === 'conflict') {
+            throw new Error(
+                `Base path '${path}' on domain ${domain} is already mapped to a different api (restApiId=${decision.conflictApiId}, stage=${decision.conflictStage}). ` +
+                `Refusing to overwrite. Remove the conflicting mapping or rename '${api.name}'s composed path.`
+            );
+        } else if (decision.action === 'existing') {
+            logger.verbose(`   - using existing mapping for ${domain} with path '${path}'`);
+        } else if (decision.action === 'move') {
+            logger.verbose(`   - moving mapping for ${domain}: '${decision.from}' → '${path}'`);
+            await apigw.deleteBasePathMapping(domain, decision.from);
+            await apigw.createCustomDomainMappingV2(domain, apiId, stage, path);
+            mappingAction = 'moved';
+        } else {
+            logger.verbose(`   - create mapping for ${domain} with path '${path}'`);
             try {
-                await apigw.createCustomDomainMappingV2(localStageConfig.mapping.domain,apiId,stage,path);
+                await apigw.createCustomDomainMappingV2(domain, apiId, stage, path);
                 mappingAction = 'created';
-            }catch(e) {
-                logger.verbose(`   x mapping for ${localStageConfig.mapping.domain} with path '${path}' already exists`);
+            } catch (e) {
+                logger.verbose(`   x mapping for ${domain} with path '${path}' already exists`);
             }
         }
 
@@ -1292,6 +1337,7 @@ export {
     getConfig,
     getVar,
     composeMappingPath,
+    decideMappingAction,
     findAliasExact,
     findVersion,
     validateRollbackTarget,
