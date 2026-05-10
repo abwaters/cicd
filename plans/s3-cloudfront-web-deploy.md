@@ -55,11 +55,12 @@ Add a third branch to the `exports` `oneOf`:
   "description": "S3/CloudFront static-site deployment",
   "required": ["type", "name", "distribution"],
   "properties": {
-    "type":         { "const": "web" },
-    "name":         { "type": "string", "description": "CloudFormation export → S3 bucket name" },
-    "distribution": { "type": "string", "description": "CloudFormation export → CloudFront distribution ID" },
-    "stages":       { "type": "array", "items": { "type": "string" } },   // optional, like sns/sqs
-    "source":       { "type": "string", "description": "Override default ./dist/ source" }  // optional escape hatch
+    "type":           { "const": "web" },
+    "name":           { "type": "string", "description": "CloudFormation export → S3 bucket name" },
+    "distribution":   { "type": "string", "description": "CloudFormation export → CloudFront distribution ID" },
+    "stages":         { "type": "array", "items": { "type": "string" } },   // optional, like sns/sqs
+    "source":         { "type": "string", "description": "Override default ./dist/ source" },  // optional escape hatch
+    "noindexStages":  { "type": "array", "items": { "type": "string" }, "description": "Stages where cicd injects a Disallow:/ robots.txt (overriding any source robots.txt). Always also applied to dark deploys in v2." }
   }
 }
 ```
@@ -71,9 +72,34 @@ Example `cicd.json` block:
 {
   "type": "web",
   "name": "ccfw-www-bucket",
-  "distribution": "ccfw-www-distribution"
+  "distribution": "ccfw-www-distribution",
+  "noindexStages": ["staging", "dev"]
 }
 ```
+
+---
+
+## Robots noindex injection
+
+Goal: keep search engines off non-production deployments without requiring the build pipeline to produce a stage-aware artifact.
+
+Behavior:
+- For any stage listed in the export's `noindexStages`, `processWeb()` injects a synthetic `robots.txt` into the upload alongside the `./dist/` contents:
+  ```
+  User-agent: *
+  Disallow: /
+  ```
+- The injected file overrides any `robots.txt` present in `./dist/` for that stage's upload only — it does **not** mutate the local source tree, just the uploaded object at `s3://{bucket}/{stage}/{commit}/robots.txt`.
+- Stages not in `noindexStages` upload whatever (or nothing) the build produced; cicd does not touch their `robots.txt`.
+- Cache-control on the injected `robots.txt` is `no-cache, no-store, must-revalidate` (treated like HTML), so flipping a stage in/out of `noindexStages` takes effect on next deploy without lingering in CDN caches.
+
+Implementation:
+- New helper in `src/shared/s3.ts`: `putObject(bucket, key, body, contentType, cacheControl)` — small wrapper around `PutObjectCommand` for arbitrary in-memory content.
+- In `processWeb()`, after `s3.uploadDirectory(...)` for each stage, if `stage ∈ export.noindexStages`, call `s3.putObject(bucket, '{stage}/{commit}/robots.txt', '<body>', 'text/plain', 'no-cache, no-store, must-revalidate')`.
+- Dry-run mode logs `WOULD inject robots.txt (Disallow: /)` like other mutating calls.
+
+Forward-looking — dark deploys (v2):
+- When `--dark` lands, dark uploads should **always** get the synthetic `Disallow: /` robots.txt regardless of stage, since darks are by definition not the public-facing deployment for that host. The `noindexStages` config still governs the production-stage flips.
 
 ---
 
@@ -83,6 +109,7 @@ Both follow the existing wrapper pattern (lazy singleton client, `awsRetry()`, n
 
 ### `src/shared/s3.ts` — new
 - `uploadDirectory(bucket, keyPrefix, localDir, contentTypeFor, cacheControlFor)` — walks `localDir` recursively, issues `PutObjectCommand` per file with derived `ContentType` and `CacheControl`
+- `putObject(bucket, key, body, contentType, cacheControl)` — single-object upload for synthetic content (e.g. injected `robots.txt`)
 - `listObjectsByPrefix(bucket, prefix)` — paginated `ListObjectsV2Command`
 - `listCommonPrefixes(bucket, prefix, delimiter)` — `ListObjectsV2Command` with `Delimiter` for `{stage}/{commit}/` enumeration
 - `deleteObjects(bucket, keys)` — `DeleteObjectsCommand` in batches of 1000
@@ -125,9 +152,10 @@ For each `web` export (respecting `webFilter` and `stages` array):
 2. Resolve `source = export.source ?? './dist'` (relative to `process.cwd()`)
 3. Validate `source` exists and is non-empty (fail loud — a silent no-op upload is worse than an error)
 4. **Upload** `source/**` → `s3://{bucket}/{stage}/{commit}/` (via `s3.uploadDirectory`)
-5. **Promote**: `cloudfront.updateOriginPath(distributionId, stage, '/' + stage + '/' + commit)`
-6. **Invalidate**: `cloudfront.createInvalidation(distributionId, ['/*'])`
-7. Skip every AWS-mutating call when `dryRun` (log "WOULD ..." like other process functions)
+5. **Inject `robots.txt`** if `stage ∈ export.noindexStages` (or in v2, if this is a dark deploy) — overwrites any `robots.txt` from the source for this stage's upload (see "Robots noindex injection" above)
+6. **Promote**: `cloudfront.updateOriginPath(distributionId, stage, '/' + stage + '/' + commit)`
+7. **Invalidate**: `cloudfront.createInvalidation(distributionId, ['/*'])`
+8. Skip every AWS-mutating call when `dryRun` (log "WOULD ..." like other process functions)
 
 Return `WebResult` with per-export `{ bucket, distribution, originPath, invalidationId, fileCount, totalBytes }`.
 
@@ -141,6 +169,7 @@ export interface WebExportResult {
     invalidationId?: string;
     fileCount: number;
     totalBytes: number;
+    noindexInjected: boolean;
 }
 export interface WebResult { exports: WebExportResult[]; }
 ```
@@ -307,6 +336,7 @@ Add `processWeb` boolean and `webFilter` string:
 8. **Rollback within window:** `node src/index.js rollback staging --web` — flips origin path back to the prior commit (still in keep window, so its S3 folder is intact).
 9. **Rollback outside window (failure mode):** ask to roll back to a commit older than the keep window. The command must fail fast with `commit {sha} is outside the rollback window for staging (keep window = N=5)` before any AWS calls. No infra changes occur.
 10. **Drift warning:** manually edit the staging CloudFront origin's `OriginPath` (or an ECS service's task def) to a stale commit, then run `node src/index.js info` — output highlights the drift (live pointer ≠ `recent[0]`). `clean` likewise warns but does not fail.
+11. **Robots noindex:** with `noindexStages: ["staging"]` configured, deploy to staging and `curl https://staging.<domain>/robots.txt` — must return `User-agent: *\nDisallow: /`. Deploy to prod (not in `noindexStages`) and confirm `robots.txt` is whatever the build produced (or 404 if absent), unmodified by cicd.
 
 ---
 

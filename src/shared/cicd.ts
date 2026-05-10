@@ -531,7 +531,7 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
         if (dryRun) {
             const path = composeMappingPath(localStageConfig, api);
             logger.verbose(`   - WOULD create deployment, update stage '${stage}', and map to ${localStageConfig.mapping.domain}/${path}`);
-            results.push({ name: api.name, deployment: 'created', stage: 'created', mapping: 'created', throttle: 'dry-run', functions: api.functions.length });
+            results.push({ name: api.name, deployment: 'created', stage: 'created', mapping: 'created', throttle: 'dry-run', functions: api.functions!.length });
             continue;
         }
         let deploymentAction: 'created' | 'existing' = 'existing';
@@ -597,7 +597,7 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
         }
 
         // update permissions for functions
-        for(const f of api.functions) {
+        for(const f of api.functions!) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value!;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
@@ -611,7 +611,7 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
             stage: stageAction,
             mapping: mappingAction,
             throttle: throttleLabel,
-            functions: api.functions.length
+            functions: api.functions!.length
         });
     }
     return results;
@@ -653,7 +653,7 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
         }
 
         if (dryRun) {
-            for (const f of topic.functions) {
+            for (const f of topic.functions!) {
                 logger.verbose(`   - WOULD subscribe '${f.value}' to SNS topic '${topic.name}'`);
             }
             results.push({ name: topic.name, action: 'subscribed', oldRemoved: 0 });
@@ -661,7 +661,7 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
         }
 
         let oldRemoved = 0;
-        for(const f of topic.functions) {
+        for(const f of topic.functions!) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value!;
             let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
@@ -727,7 +727,7 @@ async function processSQSEventSources(stage: string, appAlias: string, commit: s
         }
 
         if (dryRun) {
-            for (const f of queue.functions) {
+            for (const f of queue.functions!) {
                 logger.verbose(`   - WOULD map '${f.value}' to SQS queue '${queue.name}'`);
             }
             results.push({ name: queue.name, action: 'created', oldRemoved: 0 });
@@ -736,7 +736,7 @@ async function processSQSEventSources(stage: string, appAlias: string, commit: s
 
         let oldRemoved = 0;
         let perQueueAction: 'created' | 'updated' | 'exists' = 'exists';
-        for(const f of queue.functions) {
+        for(const f of queue.functions!) {
             const functionName = f.value!;
             const functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
             const desiredOpts = {

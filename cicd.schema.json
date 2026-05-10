@@ -117,7 +117,7 @@
     },
     "exports": {
       "type": "array",
-      "description": "Array of API Gateway, SNS, and SQS resources to manage",
+      "description": "Array of API Gateway, SNS, SQS, and web (S3/CloudFront) resources to manage",
       "minItems": 1,
       "items": {
         "oneOf": [
@@ -236,6 +236,48 @@
                 "items": {
                   "$ref": "#/definitions/sqsFunctionConfig"
                 }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "S3/CloudFront static-site deployment",
+            "required": ["type", "name", "distribution"],
+            "properties": {
+              "type": {
+                "const": "web"
+              },
+              "name": {
+                "type": "string",
+                "description": "CloudFormation export name for the S3 bucket name",
+                "minLength": 1
+              },
+              "distribution": {
+                "type": "string",
+                "description": "CloudFormation export name for the CloudFront distribution ID",
+                "minLength": 1
+              },
+              "stages": {
+                "type": "array",
+                "description": "Stages where this web deployment should run (defaults to all stages)",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "source": {
+                "type": "string",
+                "description": "Local source directory to upload (defaults to ./dist)",
+                "minLength": 1
+              },
+              "noindexStages": {
+                "type": "array",
+                "description": "Stages where cicd injects a Disallow:/ robots.txt overriding any source robots.txt",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
               }
             },
             "additionalProperties": false
