@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope } from './shared/scope';
@@ -10,6 +11,15 @@ import * as logger from './shared/logger';
 import * as github from './shared/github';
 import { isNetworkError, describeNetworkError } from './shared/utils';
 import { printHeader } from './shared/header';
+
+function getCurrentCommit(): string {
+    try {
+        return execSync('git rev-parse --short HEAD', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    } catch (err: any) {
+        console.error(`Failed to determine current commit: ${err.message || err}`);
+        process.exit(1);
+    }
+}
 
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
@@ -24,8 +34,8 @@ async function main(): Promise<void> {
         logger.setVerbose(true);
         logger.log('Verbose mode enabled');
     }
-    if( args.length != 2 ) {
-        console.log(`deploy <stage> <commit>`);
+    if( args.length < 1 || args.length > 2 ) {
+        console.log(`deploy <stage> [commit]`);
         process.exit(0);
     }
 
@@ -34,7 +44,7 @@ async function main(): Promise<void> {
 
     // TODO: formalize the cicd initialization...
     const stage = args[0];
-    const commit = args[1];
+    const commit = args[1] || getCurrentCommit();
     const app = await cicd.getConfig("app");
     const appAlias = `${app}-${commit}`;
     await cicd.setStageConfig(stage);
