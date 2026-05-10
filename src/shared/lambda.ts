@@ -74,7 +74,7 @@ async function listAliases(functionName: string): Promise<AliasInfo[]> {
         const response = await awsRetry(() => lambdaClient.send(command));
         const aliases: AliasInfo[] = [];
         for(const alias of (response.Aliases || [])) {
-            aliases.push({alias: alias.Name!, version: alias.FunctionVersion!});
+            aliases.push({alias: alias.Name!, version: alias.FunctionVersion!, description: alias.Description});
         }
         return aliases;
     } catch (error) {
@@ -111,13 +111,13 @@ async function listFunctionTags(functionArn: string): Promise<Record<string, str
     }
 }
 
-async function createAlias(functionName: string, commit: string, functionVersion: string): Promise<CreateAliasCommandOutput | null> {
+async function createAlias(functionName: string, aliasName: string, functionVersion: string, description?: string): Promise<CreateAliasCommandOutput | null> {
     try {
         const command = new CreateAliasCommand({
             FunctionName: functionName,
-            Name: commit,
+            Name: aliasName,
             FunctionVersion: functionVersion,
-            Description: commit
+            Description: description ?? aliasName
         });
         const lambdaClient = await getClient();
         const response = await awsRetry(() => lambdaClient.send(command));

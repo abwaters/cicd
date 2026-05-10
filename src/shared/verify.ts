@@ -1,8 +1,6 @@
 import * as cicd from './cicd';
 import * as apigw from './apigw';
 import * as sns from './sns';
-import * as lambda from './lambda';
-import * as logger from './logger';
 
 export interface VerificationResult {
     passed: boolean;
@@ -64,25 +62,19 @@ async function verifyDeployment(stage: string, appAlias: string, commit: string)
         });
     }
 
-    // Verify worker stage aliases — alias name is the stage; the version it points at
-    // should have a description matching the deployed commit.
+    // Verify worker stage aliases — alias name is the stage; the alias's Description
+    // is the deployed commit. We track commit on the alias (mutable) rather than the
+    // underlying version (immutable, and reused by AWS when $LATEST is unchanged).
     const workers = await cicd.getWorkers(stage);
     for (const w of workers) {
         const stageAlias = await cicd.findAliasExact(w.value!, stage);
-        let actual = '(no alias)';
-        let passed = false;
-        if (stageAlias) {
-            const versions = await lambda.listVersions(w.value!);
-            const v = versions.find(v => v.version === stageAlias.version);
-            actual = v?.description || stageAlias.version;
-            passed = !!v && v.description === commit;
-        }
+        const actual = stageAlias?.description || '(no alias)';
         checks.push({
             type: 'worker',
             name: w.value!,
             expected: commit,
             actual,
-            passed
+            passed: !!stageAlias && stageAlias.description === commit
         });
     }
 
