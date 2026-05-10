@@ -49,6 +49,20 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
     const stages: StageConfig[] = await cicd.getConfig("stages");
 
+    // Most-recent successful commit per stage (for drift detection). Empty when
+    // 'repo' is not configured — drift checks then become no-ops.
+    const recentByStage = new Map<string, string>();
+    const recentSet = await cicd.buildKeepSet(1);
+    for (const [stageName, commits] of recentSet) {
+        const first = [...commits][0];
+        if (first) recentByStage.set(stageName, first);
+    }
+    function driftLabel(stageName: string, liveCommit: string): string {
+        const recent = recentByStage.get(stageName);
+        if (!recent || !liveCommit || liveCommit === 'not deployed') return '';
+        return liveCommit === recent ? '' : `  (drift: most recent kept = ${recent})`;
+    }
+
     if (computeMode === 'fargate') {
         // ── Fargate info flow ────────────────────────────────────────
         const fargateConfig = await cicd.resolveFargateConfig();
@@ -71,7 +85,7 @@ async function main(): Promise<void> {
                 const commit = commitEnv?.value || imageTag;
 
                 const counts = `desired:${serviceInfo.desiredCount} running:${serviceInfo.runningCount} pending:${serviceInfo.pendingCount}`;
-                console.log(`  ${stage.stage.padEnd(15)} ${commit.padEnd(12)} ${counts}`);
+                console.log(`  ${stage.stage.padEnd(15)} ${commit.padEnd(12)} ${counts}${driftLabel(stage.stage, commit)}`);
                 if (o.details) {
                     console.log(`    - service:    ${stage.service}`);
                     console.log(`    - task def:   ${serviceInfo.taskDefinitionArn}`);
@@ -239,9 +253,12 @@ async function main(): Promise<void> {
         let commits = Object.keys(stageEntry.commits);
         commits = commits.map(c=>c.split('-')[1]);
         if( commits.length === 1 ) {
-            console.log(`  ${stageKey.padEnd(15)} ${commits[0]}`);
+            console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${driftLabel(stageKey, commits[0])}`);
         }else if( commits.length > 1 ) {
-            console.log(`  ${stageKey.padEnd(15)} ${commits.join(', ')}`);
+            // Mixed commits across this stage's APIs — flag any that disagree with most-recent kept.
+            const recent = recentByStage.get(stageKey);
+            const drift = recent && !commits.includes(recent) ? `  (drift: most recent kept = ${recent})` : '';
+            console.log(`  ${stageKey.padEnd(15)} ${commits.join(', ')}${drift}`);
         }else{
             console.log(`  ${stageKey.padEnd(15)} not deployed`);
         }
@@ -307,7 +324,7 @@ async function main(): Promise<void> {
                 } catch (e: any) {
                     commit = `error: ${e.message}`;
                 }
-                console.log(`    ${stage.stage.padEnd(15)} ${commit}`);
+                console.log(`    ${stage.stage.padEnd(15)} ${commit}${driftLabel(stage.stage, commit)}`);
             }
         }
     }

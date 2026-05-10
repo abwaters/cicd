@@ -38,6 +38,7 @@ import * as s3 from './s3';
 import * as cloudfront from './cloudfront';
 import * as ps from './ps';
 import * as path from 'path';
+import * as github from './github';
 import { getConfig } from './config';
 import * as logger from './logger';
 
@@ -1211,6 +1212,46 @@ async function processFargateRestart(stage: string, noWait: boolean = false): Pr
     };
 }
 
+// Build the per-stage keep set: the last N successful GitHub deployments per stage,
+// expressed as bare short commit SHAs. Used by clean (what to keep) and rollback
+// (what's recoverable).
+async function buildKeepSet(n: number = 5): Promise<Map<string, Set<string>>> {
+    const repo = await getConfig('repo');
+    const stages: StageConfig[] = await getConfig('stages');
+    const keep = new Map<string, Set<string>>();
+    for (const s of stages) keep.set(s.stage, new Set<string>());
+    if (!repo) {
+        logger.verbose(`   - 'repo' not configured; keep set is empty for all stages`);
+        return keep;
+    }
+    for (const s of stages) {
+        // Pull more than n then filter — successful deployments are interleaved with failures.
+        const fetched = github.listDeployments(repo, s.stage, n * 4);
+        const successful = fetched.filter(d => d.status === 'success' || d.status === 'inactive');
+        const set = keep.get(s.stage)!;
+        for (const d of successful.slice(0, n)) set.add(d.ref);
+    }
+    return keep;
+}
+
+// Extract the bare commit from an alias name (`{app}-{commit}`). Returns the input
+// unchanged if there's no `-`.
+function commitFromAlias(alias: string): string {
+    const idx = alias.indexOf('-');
+    return idx >= 0 ? alias.substring(idx + 1) : alias;
+}
+
+// Union of commits across stages — used for artifacts shared across stages
+// (Lambda aliases, ECR images).
+function unionKeep(keep: Map<string, Set<string>>, stageNames: Iterable<string>): Set<string> {
+    const out = new Set<string>();
+    for (const s of stageNames) {
+        const set = keep.get(s);
+        if (set) for (const c of set) out.add(c);
+    }
+    return out;
+}
+
 async function validateRollbackTarget(appAlias: string, stage?: string, commit?: string): Promise<{ valid: boolean; warnings: string[] }> {
     const warnings: string[] = [];
     const apiFunctions = await getLambdaExports('api');
@@ -1254,6 +1295,9 @@ export {
     findAliasExact,
     findVersion,
     validateRollbackTarget,
+    buildKeepSet,
+    commitFromAlias,
+    unionKeep,
     processFunctionEnvironmentVars,
     processApiGateway,
     processSNS,
