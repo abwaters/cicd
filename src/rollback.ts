@@ -52,39 +52,52 @@ async function main(): Promise<void> {
     // Validate stage exists
     await cicd.setStageConfig(stage);
 
-    // Fetch deployment history
-    const deployments = github.listDeployments(repo, stage, 10);
-    const successful = deployments.filter((d: any) => d.status === 'success' || d.status === 'inactive');
-
-    if (successful.length < 2 && !targetCommit) {
-        console.error(`Error: No prior successful deployment found for stage '${stage}' to rollback to.`);
+    // Read keep window (rollback window). The keep set IS the rollback window — any
+    // commit not in the last N successful deployments is unrecoverable because
+    // `clean --keep=N` deletes its artifacts.
+    const keepN = o.keep ? Number(o.keep) : 5;
+    if (!Number.isFinite(keepN) || keepN < 1) {
+        console.error(`Error: --keep must be a positive integer (got '${o.keep}')`);
         process.exit(1);
     }
+
+    // Fetch deployment history (pull more than N to keep filtering headroom)
+    const deployments = github.listDeployments(repo, stage, Math.max(10, keepN * 4));
+    const successful = deployments.filter((d: any) => d.status === 'success' || d.status === 'inactive');
 
     if (successful.length === 0) {
         console.error(`Error: No successful deployments found for stage '${stage}'.`);
         process.exit(1);
     }
 
-    const current = successful[0];
+    // Keep window for this stage: first N successful deployments.
+    const window = successful.slice(0, keepN);
+    const windowRefs = new Set(window.map((d: any) => d.ref));
+
+    if (window.length < 2 && !targetCommit) {
+        console.error(`Error: No prior successful deployment found for stage '${stage}' to rollback to (window size = ${window.length}).`);
+        process.exit(1);
+    }
+
+    const current = window[0];
     let target: any;
 
     if (targetCommit) {
-        target = successful.find((d: any) => d.ref === targetCommit);
-        if (!target) {
-            console.error(`Error: Commit '${targetCommit}' not found in recent successful deployments for '${stage}'.`);
-            console.error(`\nRecent successful deployments:`);
-            for (const d of successful) {
+        if (!windowRefs.has(targetCommit)) {
+            console.error(`Error: Commit '${targetCommit}' is outside the rollback window for stage '${stage}' (keep window = N=${keepN}).`);
+            console.error(`\nRecoverable commits (in window):`);
+            for (const d of window) {
                 console.error(`  ${d.ref}  ${d.createdAt}  ${d.description}`);
             }
             process.exit(1);
         }
+        target = window.find((d: any) => d.ref === targetCommit);
         if (target.ref === current.ref) {
             console.error(`Error: Commit '${targetCommit}' is already the current deployment.`);
             process.exit(1);
         }
     } else {
-        target = successful[1];
+        target = window[1];
     }
 
     // Determine scope
@@ -99,6 +112,7 @@ async function main(): Promise<void> {
     console.log(`  Stage:    ${stage}`);
     console.log(`  Current:  ${current.ref}  (deployed ${current.createdAt})`);
     console.log(`  Target:   ${target.ref}  (deployed ${target.createdAt})`);
+    console.log(`  Window:   ${window.length} of ${keepN} kept`);
     console.log(`  Scope:    ${scopeLabel(scope)}`);
     console.log();
 

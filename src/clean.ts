@@ -5,6 +5,8 @@ import * as lambda from './shared/lambda';
 import * as apigw from './shared/apigw';
 import * as ecs from './shared/ecs';
 import * as ecr from './shared/ecr';
+import * as s3 from './shared/s3';
+import * as cloudfront from './shared/cloudfront';
 import * as cicd from './shared/cicd';
 import * as credentials from './shared/credentials';
 import * as options from './shared/options';
@@ -27,11 +29,91 @@ async function main(): Promise<void> {
 
     const account = await cicd.getConfig("account");
     const region = await cicd.getConfig("region");
+    const app: string = await cicd.getConfig("app");
+    const dryRun = !!o.dryRun;
+
+    // Keep window — last N successful deployments per stage. Drives both web
+    // S3 prefix retention and the Lambda/Fargate keep-set unions.
+    const keepN = o.keep ? Number(o.keep) : 5;
+    if (!Number.isFinite(keepN) || keepN < 1) {
+        console.error(`Error: --keep must be a positive integer (got '${o.keep}')`);
+        process.exit(1);
+    }
+    const keep = await cicd.buildKeepSet(keepN);
 
     console.time("api cicd");
     if (!o.noHeader) printHeader();
 
+    const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
+    console.log(`Cleaning with keep window N=${keepN}${dryRunLabel}`);
+
+    // Print keep set per stage
+    if (keep.size > 0) {
+        console.log(`\nKeep set (recoverable commits per stage):`);
+        for (const [stageName, commits] of keep) {
+            const list = [...commits];
+            console.log(`  ${stageName.padEnd(15)} ${list.length === 0 ? 'none' : list.join(', ')}`);
+        }
+    }
+
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
+
+    // ── Web phase (runs in any compute mode) ─────────────────────────
+    const webExports: ExportConfig[] = await cicd.getExportsByType('web');
+    if (webExports.length > 0) {
+        console.log(`\nWeb cleanup:`);
+        const allStages: StageConfig[] = await cicd.getConfig("stages");
+        for (const w of webExports) {
+            const bucket = w.value!;
+            const distribution = w.distributionValue!;
+            const applicableStages = allStages.filter(s => !w.stages || w.stages.includes(s.stage));
+
+            // Drift check: CF OriginPath should equal /{stage}/{recent[0]}
+            for (const s of applicableStages) {
+                try {
+                    const originPath = await cloudfront.getOriginPath(distribution, s.stage);
+                    const recent = [...(keep.get(s.stage) ?? new Set<string>())][0];
+                    if (originPath && recent) {
+                        const expected = `/${s.stage}/${recent}`;
+                        if (originPath !== expected) {
+                            console.log(`  WARN: ${w.name} stage '${s.stage}' OriginPath '${originPath}' != most-recent kept '${expected}' (drift)`);
+                        }
+                    }
+                } catch (e: any) {
+                    logger.verbose(`   - drift check failed for ${w.name}/${s.stage}: ${e.message}`);
+                }
+            }
+
+            // Per-stage prefix cleanup
+            for (const s of applicableStages) {
+                const stagePrefix = `${s.stage}/`;
+                const commitPrefixes = await s3.listCommonPrefixes(bucket, stagePrefix);
+                const keepStage = keep.get(s.stage) ?? new Set<string>();
+                let removed = 0, kept = 0, removedBytes = 0;
+                for (const cp of commitPrefixes) {
+                    // cp shape: '{stage}/{commit}/' — extract commit
+                    const trimmed = cp.replace(/\/$/, '');
+                    const segments = trimmed.split('/');
+                    const commit = segments[segments.length - 1];
+                    if (keepStage.has(commit)) {
+                        kept++;
+                        logger.verbose(`   - keep s3://${bucket}/${cp}`);
+                    } else {
+                        const keys = await s3.listObjectsByPrefix(bucket, cp);
+                        if (dryRun) {
+                            logger.verbose(`   - WOULD delete s3://${bucket}/${cp} (${keys.length} objects)`);
+                        } else {
+                            const deleted = await s3.deleteObjects(bucket, keys);
+                            logger.verbose(`   - deleted s3://${bucket}/${cp} (${deleted}/${keys.length} objects)`);
+                        }
+                        removed++;
+                        removedBytes += keys.length;
+                    }
+                }
+                console.log(`  ${w.name.padEnd(30)} stage ${s.stage.padEnd(10)} kept ${kept}, ${dryRun ? 'would remove' : 'removed'} ${removed} commit folder(s) (${removedBytes} object(s))`);
+            }
+        }
+    }
 
     if (computeMode === 'fargate') {
         // ── Fargate clean flow ───────────────────────────────────────
@@ -66,25 +148,61 @@ async function main(): Promise<void> {
                 const imageTag = container?.image?.split(':')[1];
                 if (imageTag) activeTags.add(imageTag);
 
+                // Per-family keep tag set: union of keep across stages on this family.
+                const familyKeepTags = new Set<string>();
+                for (const sName of info.stages) {
+                    const kt = keep.get(sName);
+                    if (kt) for (const c of kt) familyKeepTags.add(c);
+                }
+                // Drift check: live tag should match recent[0] for any of this family's stages.
+                if (imageTag) {
+                    const recents = info.stages
+                        .map(s => [...(keep.get(s) ?? new Set<string>())][0])
+                        .filter(Boolean);
+                    if (recents.length > 0 && !recents.includes(imageTag)) {
+                        console.log(`  WARN: ${taskFamily} live image tag '${imageTag}' != most-recent kept (${recents.join(', ')}) (drift)`);
+                    }
+                }
+
                 const revisions: string[] = await ecs.listTaskDefinitionRevisions(taskFamily);
                 let deregistered = 0;
                 for (const rev of revisions) {
-                    if (rev !== activeTaskDefArn) {
-                        logger.verbose(`   - Deregistering ${rev}`);
-                        await ecs.deregisterTaskDefinition(rev);
-                        deregistered++;
-                    } else {
+                    if (rev === activeTaskDefArn) {
                         logger.verbose(`   - Active: ${rev}`);
+                        continue;
                     }
+                    // Inspect this revision's image tag; keep if in window.
+                    let revTag: string | undefined;
+                    try {
+                        const revTaskDef = await ecs.describeTaskDefinition(rev);
+                        const revContainer = (revTaskDef.containerDefinitions || [])
+                            .find((c: any) => c.name === fargateConfig.containerName);
+                        revTag = revContainer?.image?.split(':')[1];
+                    } catch (e: any) {
+                        logger.verbose(`   - failed to describe ${rev}: ${e.message}`);
+                    }
+                    if (revTag && familyKeepTags.has(revTag)) {
+                        logger.verbose(`   - Keep ${rev} (image tag '${revTag}' in window)`);
+                        activeTags.add(revTag);
+                        continue;
+                    }
+                    logger.verbose(`   - ${dryRun ? 'WOULD deregister' : 'Deregistering'} ${rev}`);
+                    if (!dryRun) await ecs.deregisterTaskDefinition(rev);
+                    deregistered++;
                 }
                 totalDeregistered += deregistered;
                 const activeRevision = activeTaskDefArn.split(':').pop() || '?';
                 const stageLabel = info.stages.join(', ');
-                console.log(`  ${taskFamily.padEnd(30)} active rev ${activeRevision}, ${deregistered} deregistered (${stageLabel})`);
+                console.log(`  ${taskFamily.padEnd(30)} active rev ${activeRevision}, ${dryRun ? 'would deregister' : 'deregistered'} ${deregistered} (${stageLabel})`);
             } catch (e: any) {
                 const stageLabel = info.stages.join(', ');
                 console.log(`  ${taskFamily.padEnd(30)} error: ${e.message} (${stageLabel})`);
             }
+        }
+
+        // Union all keep tags across all stages — ECR is shared across stages.
+        for (const set of keep.values()) {
+            for (const c of set) activeTags.add(c);
         }
 
         // ── Phase 2: ECR image cleanup ───────────────────────────────
@@ -108,12 +226,20 @@ async function main(): Promise<void> {
                 const activeTagList = [...activeTags].map(t => t.substring(0, 7)).join(', ');
 
                 if (toDelete.length > 0) {
-                    const result = await ecr.batchDeleteImages(repositoryName, toDelete);
-                    totalEcrDeleted = result.deleted;
-                    totalEcrFailures = result.failures;
-                    console.log(`  ${repositoryName.padEnd(30)} ${totalEcrDeleted} deleted, ${activeCount} active (${activeTagList})`);
-                    if (totalEcrFailures > 0) {
-                        console.log(`  ${' '.padEnd(30)} ${totalEcrFailures} failures`);
+                    if (dryRun) {
+                        totalEcrDeleted = toDelete.length;
+                        for (const img of toDelete) {
+                            logger.verbose(`   - WOULD delete ${img.imageTag ?? '(untagged)'}@${img.imageDigest}`);
+                        }
+                        console.log(`  ${repositoryName.padEnd(30)} ${totalEcrDeleted} would be deleted, ${activeCount} active (${activeTagList})`);
+                    } else {
+                        const result = await ecr.batchDeleteImages(repositoryName, toDelete);
+                        totalEcrDeleted = result.deleted;
+                        totalEcrFailures = result.failures;
+                        console.log(`  ${repositoryName.padEnd(30)} ${totalEcrDeleted} deleted, ${activeCount} active (${activeTagList})`);
+                        if (totalEcrFailures > 0) {
+                            console.log(`  ${' '.padEnd(30)} ${totalEcrFailures} failures`);
+                        }
                     }
                 } else {
                     console.log(`  ${repositoryName.padEnd(30)} no unused images, ${activeCount} active (${activeTagList})`);
@@ -123,7 +249,8 @@ async function main(): Promise<void> {
             }
         }
 
-        console.log(`\nSummary: Deregistered ${totalDeregistered} task definition revisions, deleted ${totalEcrDeleted} ECR images`);
+        const verb = dryRun ? 'would' : '';
+        console.log(`\nSummary${dryRunLabel}: ${verb ? verb + ' deregister' : 'Deregistered'} ${totalDeregistered} task definition revisions, ${verb ? verb + ' delete' : 'deleted'} ${totalEcrDeleted} ECR images`);
         console.log();
         console.timeEnd("api cicd");
         return;
@@ -155,11 +282,28 @@ async function main(): Promise<void> {
     // Per-API results for summary
     const apiResults: CleanApiResult[] = [];
 
+    // Pre-compute alias keep set for every stage: {app}-{commit} for each commit in the
+    // window. Lambda artifacts are alias-named, so we work in alias space here.
+    const aliasKeepByStage = new Map<string, Set<string>>();
+    for (const [stageName, commits] of keep) {
+        const aliases = new Set<string>();
+        for (const c of commits) aliases.add(`${app}-${c}`);
+        aliasKeepByStage.set(stageName, aliases);
+    }
+
+    // Seed activeCommits with the keep-window alias union across all stages, so Lambda
+    // function aliases and worker versions tied to recoverable commits aren't pruned.
+    for (const aliases of aliasKeepByStage.values()) {
+        for (const a of aliases) activeCommits.set(a, true);
+    }
+
     // ── Phase 1: Scan API stages & clean deployments ──────────────────
     for(const api of apis) {
         const apiId = api.value!;
         const stages = await apigw.listStages(apiId);
         const activeDeployments = new Map<string, string[]>();
+        // Per-API keep alias set: union of aliasKeep over the stages this API serves.
+        const apiAliasKeep = new Set<string>();
         for(const s of stages) {
             const commit = s.variables!.Commit;
             activeCommits.set(commit, true);
@@ -178,23 +322,36 @@ async function main(): Promise<void> {
             } else {
                 activeDeployments.get(s.deploymentId!)!.push(s.stageName!);
             }
+
+            // Add this stage's keep aliases to the per-API union
+            const sw = aliasKeepByStage.get(s.stageName!);
+            if (sw) for (const a of sw) apiAliasKeep.add(a);
         }
+        // Add union into activeCommits so downstream Lambda alias checks honor the window.
+        for (const a of apiAliasKeep) activeCommits.set(a, true);
 
         const deployments = await apigw.listDeployments(apiId);
         let removed = 0;
         let activeCount = 0;
         const activeStageLabels: string[] = [];
         for(const d of deployments) {
-            if (!activeDeployments.has(d.id!)) {
+            const isLive = activeDeployments.has(d.id!);
+            const isInKeep = !!d.description && apiAliasKeep.has(d.description);
+            if (!isLive && !isInKeep) {
                 logger.verbose(`   - Deployment '${d.id}' deleted from ${api.name}`);
-                await apigw.deleteDeployment(apiId, d.id!);
+                if (!dryRun) await apigw.deleteDeployment(apiId, d.id!);
                 deletedDeployments++;
                 removed++;
-            } else {
+            } else if (isLive) {
                 const stageNames = activeDeployments.get(d.id!)!;
                 logger.verbose(`   - Deployment '${d.id}' active (${stageNames.join(', ')})`);
                 activeCount++;
                 activeStageLabels.push(stageNames.sort().join('/'));
+            } else {
+                // In keep window but not currently bound to a live stage — kept for rollback.
+                logger.verbose(`   - Deployment '${d.id}' kept for rollback (${d.description})`);
+                activeCount++;
+                activeStageLabels.push('keep');
             }
         }
         apiResults.push({ name: api.name, removed, activeCount, activeStageLabels });
@@ -256,8 +413,8 @@ async function main(): Promise<void> {
                 activeVersions.set(a.version, true);
                 activeCount++;
             } else {
-                logger.verbose(`   - Deleted alias '${a.alias}' from ${functionName}`);
-                await lambda.deleteAlias(functionName, a.alias);
+                logger.verbose(`   - ${dryRun ? 'WOULD delete' : 'Deleted'} alias '${a.alias}' from ${functionName}`);
+                if (!dryRun) await lambda.deleteAlias(functionName, a.alias);
                 deletedAliases++;
                 aliasesRemoved++;
             }
@@ -271,8 +428,8 @@ async function main(): Promise<void> {
             if (activeVersions.has(v.version)) {
                 logger.verbose(`   - Active version '${v.version}' on ${functionName}`);
             } else {
-                logger.verbose(`   - Deleted version '${v.version}' from ${functionName}`);
-                await lambda.deleteVersion(functionName, v.version);
+                logger.verbose(`   - ${dryRun ? 'WOULD delete' : 'Deleted'} version '${v.version}' from ${functionName}`);
+                if (!dryRun) await lambda.deleteVersion(functionName, v.version);
                 deletedVersions++;
                 versionsRemoved++;
             }
@@ -299,8 +456,8 @@ async function main(): Promise<void> {
                 activeVersions.set(a.version, true);
                 activeAliases.push(a.alias);
             } else {
-                logger.verbose(`   - Deleted stale worker alias '${a.alias}' from ${functionName}`);
-                await lambda.deleteAlias(functionName, a.alias);
+                logger.verbose(`   - ${dryRun ? 'WOULD delete' : 'Deleted'} stale worker alias '${a.alias}' from ${functionName}`);
+                if (!dryRun) await lambda.deleteAlias(functionName, a.alias);
                 deletedAliases++;
                 aliasesRemoved++;
             }
@@ -319,8 +476,8 @@ async function main(): Promise<void> {
             if (activeVersions.has(v.version) || retained.has(v.version)) {
                 logger.verbose(`   - Keeping worker version '${v.version}' on ${functionName}`);
             } else {
-                logger.verbose(`   - Deleted worker version '${v.version}' from ${functionName}`);
-                await lambda.deleteVersion(functionName, v.version);
+                logger.verbose(`   - ${dryRun ? 'WOULD delete' : 'Deleted'} worker version '${v.version}' from ${functionName}`);
+                if (!dryRun) await lambda.deleteVersion(functionName, v.version);
                 deletedVersions++;
                 versionsRemoved++;
             }
@@ -384,7 +541,8 @@ async function main(): Promise<void> {
     }
 
     // Final summary
-    console.log(`\nSummary: Removed ${deletedDeployments} deployments, ${deletedAliases} aliases, ${deletedVersions} versions`);
+    const verb = dryRun ? 'Would remove' : 'Removed';
+    console.log(`\nSummary${dryRunLabel}: ${verb} ${deletedDeployments} deployments, ${deletedAliases} aliases, ${deletedVersions} versions`);
     console.log();
     console.timeEnd("api cicd");
 }
