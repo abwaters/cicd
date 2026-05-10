@@ -138,6 +138,7 @@ export interface VersionListItem {
 export interface AliasInfo {
     alias: string;
     version: string;
+    description?: string;
 }
 
 // API Gateway
