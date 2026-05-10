@@ -149,6 +149,73 @@ Also: load `web` exports inside `init()` / `initExports()` the same way `api`/`s
 
 ---
 
+## Unified clean policy
+
+`clean` keeps the **last N successful deployments per stage** as the source of truth across all three compute modes (web, lambda, fargate). It does not infer from live infrastructure — GitHub Deployments is the ground truth for what's recoverable, and `N` is the rollback window.
+
+### Keep-set construction
+
+```
+for each stage in cicd.json.stages:
+    keep[stage] = github.listDeployments(env=stage, state=success)
+                    .slice(0, N)
+                    .map(d => d.sha)
+```
+
+`N` is a single CLI flag — `--keep=N` — applied uniformly across all phases. Default: **5**. The active commit is always position 0 (rollback creates a new deployment record on the same env, so it bubbles to the top), so the keep set inherently includes "what's serving traffic right now." No live-infra query is needed to build it.
+
+### `N` is the rollback window
+
+`rollback <stage> <commit>` validates `commit ∈ keep[stage]` before any infra changes and fails fast with a clear "outside the rollback window" message if not. This makes the v1 web caveat about rolling back to a cleaned folder obsolete — across all modes, what's not in the keep set is not rollback-able, and the user finds out before any AWS calls fire.
+
+### Per-mode artifact map
+
+Each phase walks a different artifact taxonomy with the same per-stage scoping rules.
+
+#### Web
+| Artifact | Scope | Keep rule |
+|---|---|---|
+| `s3://{bucket}/{stage}/{commit}/` | Per stage | `commit ∈ keep[stage]` |
+
+#### Lambda
+| Artifact | Scope | Keep rule |
+|---|---|---|
+| API Gateway deployments | Per REST API, pooled across its stages | `description ∈ ∪ keep[stage]` over stages on this API |
+| Lambda aliases (`{app}-{commit}`) | Per function, shared across stages | `commit ∈ ∪ keep[stage]` over stages where this function deploys |
+| Lambda versions | Per function | Reachable from a kept alias |
+
+Functions inherit the union from their declared stages: SNS / SQS / worker functions narrow to their `stages` array; API and stageless functions union over all top-level stages.
+
+**Order within phase:** delete API GW deployments → delete aliases → delete unreferenced versions. Versions cannot be deleted while aliases reference them.
+
+#### Fargate
+| Artifact | Scope | Keep rule |
+|---|---|---|
+| ECS task definition revisions | Per stage (`taskFamily` is per stage) | Image tag's commit ∈ `keep[stage]` |
+| ECR images (tag = commit) | Shared across stages | Tag ∈ `∪ keep[stage]` across all stages |
+
+**Order within phase:** deregister/delete task defs first → then delete ECR images. ECR refuses to delete images still referenced by a task definition revision.
+
+### Drift detection (uniform across modes)
+
+For each stage, compare `recent[0]` against the live pointer:
+
+| Mode | Live pointer |
+|---|---|
+| web | CloudFront origin's `OriginPath` |
+| lambda | API stage `Commit` variable + SNS subscription alias ARN |
+| fargate | ECS service's current task definition revision (image tag) |
+
+If they disagree, log a warning during `clean` and `info` — likely cause is a manual change outside cicd. Don't fail; just surface it.
+
+### Phase orchestration
+
+`clean` runs three phases sequentially: web → lambda → fargate. Each phase no-ops when the project doesn't declare that artifact type (no `web` exports → skip web phase; `computeMode != fargate` → skip fargate phase). The keep-set map is built once at the top and shared across phases.
+
+`--dry-run` prints the keep set per stage, then the deletion plan per phase, with no AWS-mutating calls.
+
+---
+
 ## CLI plumbing
 
 ### `src/shared/scope.ts`
@@ -167,18 +234,22 @@ Add `processWeb` boolean and `webFilter` string:
 - Web participates in the **existing** GitHub Deployment block at lines 51–98 / 144–166 — no new GitHub code paths needed; `environment: stage` already gives per-stage tracking, satisfying "update GitHub deployments per stage".
 
 ### `src/rollback.ts`
-- Same pattern: invoke `cicd.processWeb` when scope includes web. Document the rollback caveat: rolling back to a commit whose S3 folder has been removed by `clean` will fail at the `updateOriginPath` step (the path simply won't have content). v1 acceptable — note in the help text and in this plan; future enhancement is auto-restore from artifact storage.
+- Invoke `cicd.processWeb` when scope includes web (same pattern as deploy).
+- **Validate against keep window upfront**: before any infra changes, fetch `keep[stage]` (last N successful deployments) and refuse if the requested commit isn't in it. Print `commit {commit} is outside the rollback window for {stage} (keep window = N=5); use 'info' to see recoverable commits.` This validation applies across all three modes — web / lambda / fargate — and replaces the prior v1 caveat about rolling back to cleaned S3 folders. `clean` and `rollback` now agree on what's recoverable.
 
 ### `src/info.ts`
 - For each `web` export, call `cloudfront.getOriginPath(distributionId, stage)` per stage → parse `/{stage}/{commit}` → extract `commit`
 - Render a "Web" row alongside the existing API/SNS/SQS sections, columns: stage, commit, distribution
 
 ### `src/clean.ts`
-- New phase: for each `web` export
-  - Read active commit per stage from CloudFront origin paths → `activeWebCommits: Set<{stage,commit}>`
-  - List `s3://{bucket}/` keys grouped by `{stage}/{commit}/` prefix (use the `CommonPrefixes` from `ListObjectsV2` with `Delimiter: '/'`)
-  - Delete every `{stage}/{commit}/` group not in the active set
-  - Honor `dryRun`: log targets, don't delete
+- Build `keep[stage]` once at the top via `github.listDeployments(env=stage, state=success).slice(0, N)` — see "Unified clean policy" above for the full policy across web / lambda / fargate.
+- Read `--keep=N` from `options.ts` (default 5).
+- Replace the existing "active commits from API stages + SNS subscriptions" logic with the keep-set policy across all three phases:
+  - **Web phase**: for each `web` export, list `s3://{bucket}/` `CommonPrefixes` per stage; delete any `{stage}/{commit}/` whose `commit ∉ keep[stage]`.
+  - **Lambda phase**: rewrite to consume keep-set unions instead of the live "active commits" set. API GW deployments scoped per REST API; aliases scoped per function over the function's declared stages; versions reachable from kept aliases. Ordering: deployments → aliases → versions.
+  - **Fargate phase** (new): for each stage's `taskFamily`, deregister + delete revisions whose image commit ∉ `keep[stage]`. Then delete ECR images whose tag ∉ ∪ `keep[stage]`. Ordering: task defs → ECR.
+- Drift warnings: query the live pointer per mode (CloudFront origin path / API stage variable / ECS service task def) and warn if it ≠ `recent[0]`. Non-fatal.
+- `--dry-run`: print keep set per stage, then deletion plan per phase. No AWS mutations.
 
 ### `src/invalidate.ts` — **new** top-level subcommand
 - Usage: `node src/index.js invalidate <stage> [path1 path2 ...]`
@@ -199,6 +270,8 @@ Add `processWeb` boolean and `webFilter` string:
 **New:**
 - `src/shared/s3.ts`
 - `src/shared/cloudfront.ts`
+- `src/shared/ecr.ts` — list/batch-delete ECR images by tag (for fargate clean)
+- `src/shared/ecs.ts` — list/deregister/delete task definition revisions (for fargate clean)
 - `src/invalidate.ts`
 
 **Modified:**
@@ -206,14 +279,15 @@ Add `processWeb` boolean and `webFilter` string:
 - `src/types.ts` — `WebExportResult`, `WebResult`, plus a `web` variant on the export discriminated union
 - `src/shared/cicd.ts` — load web exports in `init()`, add `processWeb()`
 - `src/shared/scope.ts` — add `processWeb` / `webFilter`
+- `src/shared/github.js` — add `listSuccessfulDeployments(env, limit)` helper if not already present (consumed by both `clean` and `rollback`)
 - `src/deploy.ts` — call `cicd.processWeb`
-- `src/rollback.ts` — call `cicd.processWeb`
-- `src/info.ts` — render web rows
-- `src/clean.ts` — clean unused S3 commit folders
+- `src/rollback.ts` — call `cicd.processWeb`; validate target commit is in the keep window before any infra change
+- `src/info.ts` — render web rows; surface drift warnings (live pointer ≠ `recent[0]`) per mode
+- `src/clean.ts` — full rewrite to the unified keep-set policy across all three phases (web / lambda / fargate); read `--keep=N` (default 5)
 - `src/index.ts` — wire `invalidate` subcommand
-- `package.json` — add `@aws-sdk/client-s3`, `@aws-sdk/client-cloudfront`
+- `package.json` — add `@aws-sdk/client-s3`, `@aws-sdk/client-cloudfront`. (`@aws-sdk/client-ecr` and `@aws-sdk/client-ecs` are already present from fargate mode.)
 
-**No changes:** `src/options.ts` (already handles `--key=value`), `src/shared/utils.ts`, existing wrapper modules.
+**No changes:** `src/options.ts` (already handles `--key=value`, so `--keep=N` parses without modification), `src/shared/utils.ts`, existing wrapper modules.
 
 ---
 
@@ -228,16 +302,21 @@ Add `processWeb` boolean and `webFilter` string:
    - `aws cloudfront list-invalidations --distribution-id <id>` shows a fresh invalidation
    - `gh api /repos/<repo>/deployments?environment=staging` shows the new deployment with `status: success`
 5. **Info:** `node src/index.js info` — staging row reports the freshly-deployed commit.
-6. **Second deploy + clean:** deploy a second commit, then `node src/index.js clean --dry-run` — output lists the older commit folder for deletion but **not** the new one. Run without `--dry-run` and re-list S3 to confirm.
+6. **Second deploy + clean (keep window):** deploy 6+ commits to staging, then `node src/index.js clean --keep=5 --dry-run` — output lists the keep set per stage (5 most recent successful deployments), then the deletion plan: web folders, Lambda aliases, Fargate task defs, and ECR images for any commit outside the union. Run without `--dry-run` and re-list S3 / Lambda / ECR to confirm. With `--keep=2`, the deletion list grows accordingly.
 7. **Invalidate:** `node src/index.js invalidate staging /index.html` — returns an invalidation ID, visible in `list-invalidations`.
-8. **Rollback:** `node src/index.js rollback staging --web` — flips origin path back to the prior commit (the prior `s3://.../{commit}/` folder must still exist; expected limitation in v1).
+8. **Rollback within window:** `node src/index.js rollback staging --web` — flips origin path back to the prior commit (still in keep window, so its S3 folder is intact).
+9. **Rollback outside window (failure mode):** ask to roll back to a commit older than the keep window. The command must fail fast with `commit {sha} is outside the rollback window for staging (keep window = N=5)` before any AWS calls. No infra changes occur.
+10. **Drift warning:** manually edit the staging CloudFront origin's `OriginPath` (or an ECS service's task def) to a stale commit, then run `node src/index.js info` — output highlights the drift (live pointer ≠ `recent[0]`). `clean` likewise warns but does not fail.
 
 ---
 
 ## Out of scope (v2 candidates, not implemented now)
 
 - `--dark` / `promote` separation (S3 layout already accommodates it; just need the flag + a `promote` subcommand)
-- Auto-restore of S3 contents from a build artifact store during rollback when the commit folder has been cleaned
+- Per-stage `--keep=N` overrides (current design: one global N)
+- Untagged ECR image cleanup beyond commit-tagged images
 - Per-file content-type/cache-control overrides in `cicd.json`
 - Build hook (`build` command run before upload)
 - Multi-region distributions
+
+Note: the prior v2 candidate "auto-restore of S3 contents during rollback" is dropped. Under the unified keep-set policy, rollback validates the target commit against the keep window before any infra change, so the cleaned-folder scenario is now a fast-fail rather than a silent failure.
