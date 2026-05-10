@@ -1,4 +1,4 @@
-import { commitFromAlias, unionKeep, composeMappingPath } from '../src/shared/cicd';
+import { commitFromAlias, unionKeep, composeMappingPath, decideMappingAction } from '../src/shared/cicd';
 import { StageConfig, ExportConfig } from '../src/types';
 
 describe('commitFromAlias', () => {
@@ -83,5 +83,87 @@ describe('composeMappingPath', () => {
     it('skips api.prefix while keeping api.path', () => {
         expect(composeMappingPath(stage({ path: 'v1' }), api({ path: 'login' })))
             .toBe('v1/login');
+    });
+});
+
+describe('decideMappingAction', () => {
+    it('returns create when no mapping exists for this api+stage', () => {
+        const mappings = [{ basePath: 'other/path', restApiId: 'other-api', stage: 'tools' }];
+        expect(decideMappingAction(mappings, 'my-api', 'tools', 'tools/hours'))
+            .toEqual({ action: 'create' });
+    });
+
+    it('returns existing when mapping is already at the desired path', () => {
+        const mappings = [{ basePath: 'tools/hours', restApiId: 'my-api', stage: 'tools' }];
+        expect(decideMappingAction(mappings, 'my-api', 'tools', 'tools/hours'))
+            .toEqual({ action: 'existing' });
+    });
+
+    it('returns move when api+stage mapping exists but at a different path', () => {
+        const mappings = [{ basePath: 'tools/hours', restApiId: 'my-api', stage: 'tools' }];
+        expect(decideMappingAction(mappings, 'my-api', 'tools', 'tools/admin/hours'))
+            .toEqual({ action: 'move', from: 'tools/hours' });
+    });
+
+    it('returns move with empty from when current basePath is "(none)"', () => {
+        const mappings = [{ basePath: '(none)', restApiId: 'my-api', stage: 'tools' }];
+        expect(decideMappingAction(mappings, 'my-api', 'tools', 'admin'))
+            .toEqual({ action: 'move', from: '' });
+    });
+
+    it('returns move with empty from when current basePath is undefined', () => {
+        const mappings = [{ basePath: undefined, restApiId: 'my-api', stage: 'tools' }];
+        expect(decideMappingAction(mappings, 'my-api', 'tools', 'admin'))
+            .toEqual({ action: 'move', from: '' });
+    });
+
+    it('treats desired path matching "(none)" mapping as existing', () => {
+        const mappings = [{ basePath: '(none)', restApiId: 'my-api', stage: 'tools' }];
+        expect(decideMappingAction(mappings, 'my-api', 'tools', ''))
+            .toEqual({ action: 'existing' });
+    });
+
+    it('returns conflict when desired path is owned by a different api', () => {
+        const mappings = [
+            { basePath: 'tools/hours', restApiId: 'my-api', stage: 'tools' },
+            { basePath: 'tools/admin/hours', restApiId: 'other-api', stage: 'tools' }
+        ];
+        const result = decideMappingAction(mappings, 'my-api', 'tools', 'tools/admin/hours');
+        expect(result).toEqual({
+            action: 'conflict',
+            conflictApiId: 'other-api',
+            conflictStage: 'tools'
+        });
+    });
+
+    it('returns conflict when no own mapping exists but desired path is taken', () => {
+        const mappings = [{ basePath: 'tools/hours', restApiId: 'other-api', stage: 'tools' }];
+        const result = decideMappingAction(mappings, 'my-api', 'tools', 'tools/hours');
+        expect(result).toEqual({
+            action: 'conflict',
+            conflictApiId: 'other-api',
+            conflictStage: 'tools'
+        });
+    });
+
+    it('returns conflict when desired path is owned by same api in a different stage', () => {
+        const mappings = [{ basePath: 'tools/hours', restApiId: 'my-api', stage: 'prod' }];
+        const result = decideMappingAction(mappings, 'my-api', 'tools', 'tools/hours');
+        expect(result).toEqual({
+            action: 'conflict',
+            conflictApiId: 'my-api',
+            conflictStage: 'prod'
+        });
+    });
+
+    it('handles reverse migration: removing prefix moves mapping back to unprefixed path', () => {
+        const mappings = [{ basePath: 'tools/admin/hours', restApiId: 'my-api', stage: 'tools' }];
+        expect(decideMappingAction(mappings, 'my-api', 'tools', 'tools/hours'))
+            .toEqual({ action: 'move', from: 'tools/admin/hours' });
+    });
+
+    it('returns create when mapping list is empty', () => {
+        expect(decideMappingAction([], 'my-api', 'tools', 'tools/hours'))
+            .toEqual({ action: 'create' });
     });
 });

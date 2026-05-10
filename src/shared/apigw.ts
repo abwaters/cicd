@@ -1,5 +1,6 @@
 import {
     APIGatewayClient,
+    DeleteBasePathMappingCommand,
     DeleteDeploymentCommand,
     GetDeploymentsCommand,
     UpdateStageCommand,
@@ -204,6 +205,20 @@ async function updateStage(restApiId: string, stageName: string, deploymentId: s
     }
 }
 
+async function deleteBasePathMapping(domainName: string, basePath: string): Promise<void> {
+    try {
+        const command = new DeleteBasePathMappingCommand({
+            domainName: domainName,
+            basePath: basePath === '' ? '(none)' : basePath
+        });
+        const apiClient = await getClient();
+        await awsRetry(() => apiClient.send(command));
+    } catch (error) {
+        console.error(`Error deleting base path mapping '${basePath}' on domain ${domainName}:`, error);
+        throw error;
+    }
+}
+
 async function listBasePathMappings(domainName: string): Promise<BasePathMapping[]> {
     try {
         const command = new GetBasePathMappingsCommand({
@@ -262,4 +277,4 @@ async function deleteDeployment(apiId: string, deploymentId: string): Promise<vo
     }
 }
 
-export { createDeployment, createStage, deleteDeployment, createCustomDomainMapping, createCustomDomainMappingV2, listApiMappingsV2, listDeployments, listStages, updateStage, listBasePathMappings };
+export { createDeployment, createStage, deleteDeployment, createCustomDomainMapping, createCustomDomainMappingV2, listApiMappingsV2, listDeployments, listStages, updateStage, listBasePathMappings, deleteBasePathMapping };
