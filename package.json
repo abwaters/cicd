@@ -31,7 +31,15 @@
     "testEnvironment": "node",
     "testMatch": [
       "**/test/**/*.test.{js,ts}"
-    ]
+    ],
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.test.json"
+        }
+      ]
+    }
   },
   "dependencies": {
     "@aws-sdk/client-api-gateway": "^3.1042.0",
