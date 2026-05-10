@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope, scopeLabel } from './shared/scope';
 
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
 
     // Determine scope
     const scope = resolveScope(o);
-    const { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, apiFilter } = scope;
+    const { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, processWeb, apiFilter, webFilter } = scope;
     const dryRun = !!o.dryRun;
 
     // Display confirmation
@@ -201,6 +201,7 @@ async function main(): Promise<void> {
     let sqsResults: SQSResult | null = null;
     let workerResults: WorkerResult | null = null;
     let twilioResult: TwilioDeployResult | null = null;
+    let webResults: WebResult | null = null;
 
     try {
         if (processEnv) {
@@ -223,6 +224,10 @@ async function main(): Promise<void> {
             workerResults = await cicd.processWorkers(stage, commit, dryRun);
         }
 
+        if (processWeb) {
+            webResults = await cicd.processWeb(stage, appAlias, commit, webFilter, dryRun);
+        }
+
         if (processTwilio) {
             twilioResult = await cicd.processTwilio(stage, dryRun);
         }
@@ -235,7 +240,7 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
-    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult });
+    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult, web: webResults });
     console.log(`\nRollback complete: ${parts.join(', ')}`);
 
     // Verify rollback (skip in dry-run)

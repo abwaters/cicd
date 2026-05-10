@@ -43,6 +43,9 @@ async function main(): Promise<void> {
             case 'env':
                 require('./env');
                 break;
+            case 'invalidate':
+                require('./invalidate');
+                break;
             default:
                 console.error(`Error: Unknown command '${command}'\n`);
                 showUsage();
@@ -60,7 +63,8 @@ function showUsage(): void {
 
 Commands:
   deploy <stage> <commit>     Deploy a commit to a stage
-                              Options: --env, --api, --sns, --sqs, --api-filter=<name>, --verbose
+                              Options: --env, --api, --sns, --sqs, --workers, --web,
+                                       --api-filter=<name>, --web-filter=<name>, --verbose
 
   clean                       Clean up unused API deployments, Lambda aliases/versions
                               Options: --verbose
@@ -69,7 +73,8 @@ Commands:
                               Options: --details, --verbose
 
   rollback <stage> [commit]   Rollback a stage to a previous deployment
-                              Options: --env, --api, --sns, --sqs, --api-filter=<name>, --verbose
+                              Options: --env, --api, --sns, --sqs, --workers, --web,
+                                       --api-filter=<name>, --web-filter=<name>, --verbose
 
   restart <stage>             Force restart a Fargate service (fargate mode only)
                               Options: --no-wait, --verbose
@@ -77,6 +82,10 @@ Commands:
   env <stage>                 Output resolved environment variables for a stage
                               Options: --linux, --powershell, --verbose
                               Default format: Windows CMD (set KEY=VALUE)
+
+  invalidate <stage> [paths]  Create CloudFront invalidations for web exports on a stage
+                              Options: --web-filter=<name>, --verbose
+                              Default path: /*
 
   validate                    Validate cicd.json against schema
                               Options: --verbose

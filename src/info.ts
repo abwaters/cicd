@@ -24,6 +24,7 @@ import * as credentials from './shared/credentials';
 import * as logger from './shared/logger';
 import * as github from './shared/github';
 import * as ecs from './shared/ecs';
+import * as cloudfront from './shared/cloudfront';
 import { printHeader } from './shared/header';
 
 async function main(): Promise<void> {
@@ -279,6 +280,35 @@ async function main(): Promise<void> {
                 ? 'none'
                 : aliasList.map(a => `${a}=${r.commits[a]}`).join(', ');
             console.log(`  ${r.name.padEnd(45)} ${label}`);
+        }
+    }
+
+    // Web (S3 + CloudFront)
+    const webExports: ExportConfig[] = await cicd.getExportsByType('web');
+    if (webExports.length > 0) {
+        console.log(`\nWeb:`);
+        for (const w of webExports) {
+            const distribution = w.distributionValue!;
+            console.log(`  ${w.name}  (distribution ${distribution})`);
+            for (const stage of stages) {
+                if (w.stages && !w.stages.includes(stage.stage)) continue;
+                let commit = 'not deployed';
+                try {
+                    const originPath = await cloudfront.getOriginPath(distribution, stage.stage);
+                    if (originPath) {
+                        // Path shape: /{stage}/{commit}
+                        const parts = originPath.split('/').filter(p => p);
+                        if (parts.length >= 2 && parts[0] === stage.stage) {
+                            commit = parts[1];
+                        } else {
+                            commit = originPath;
+                        }
+                    }
+                } catch (e: any) {
+                    commit = `error: ${e.message}`;
+                }
+                console.log(`    ${stage.stage.padEnd(15)} ${commit}`);
+            }
         }
     }
 
