@@ -334,11 +334,11 @@ async function findAlias(functionName: string, commit: string): Promise<string> 
     return '';
 }
 
-async function findAliasExact(functionName: string, aliasName: string): Promise<{ alias: string; version: string } | null> {
+async function findAliasExact(functionName: string, aliasName: string): Promise<{ alias: string; version: string; description?: string } | null> {
     const aliases = await lambda.listAliases(functionName);
     for(const alias of aliases) {
         if( alias.alias === aliasName ) {
-            return { alias: alias.alias, version: alias.version };
+            return { alias: alias.alias, version: alias.version, description: alias.description };
         }
     }
     return null;
@@ -496,14 +496,23 @@ async function processWorkerVersionAndAlias(
         logger.verbose(`   - published version ${version} for commit '${commit}'`);
     }
 
+    // Track deployed commit via the alias Description (mutable) — version Description
+    // is unreliable because PublishVersion returns the existing version when $LATEST
+    // hasn't changed, leaving the old description in place.
     let action: 'created' | 'updated' | 'exists';
     if (!existing) {
-        await lambda.createAlias(functionName, stage, version);
+        await lambda.createAlias(functionName, stage, version, commit);
         logger.verbose(`   - created stage alias '${stage}' → version ${version} on '${functionName}'`);
         action = 'created';
     } else if (existing.version === version) {
-        logger.verbose(`   - stage alias '${stage}' already at version ${version} on '${functionName}'`);
-        action = 'exists';
+        if (existing.description !== commit) {
+            await lambda.updateAlias(functionName, stage, version, commit);
+            logger.verbose(`   - stage alias '${stage}' at version ${version}, refreshed commit '${existing.description}' → '${commit}' on '${functionName}'`);
+            action = 'updated';
+        } else {
+            logger.verbose(`   - stage alias '${stage}' already at version ${version} commit '${commit}' on '${functionName}'`);
+            action = 'exists';
+        }
     } else {
         await lambda.updateAlias(functionName, stage, version, commit);
         logger.verbose(`   - re-pointed stage alias '${stage}' from version ${existing.version} → ${version} on '${functionName}'`);
