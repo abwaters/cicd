@@ -28,14 +28,18 @@ export interface ThrottleSettings {
 }
 
 export interface ExportConfig {
-    type: 'api' | 'sns' | 'sqs';
+    type: 'api' | 'sns' | 'sqs' | 'web';
     name: string;
     path?: string;
     prefix?: string;
     throttle?: ThrottleSettings;
     stages?: string[];
-    functions: FunctionConfig[];
-    value?: string; // resolved at runtime
+    functions?: FunctionConfig[];
+    distribution?: string;          // web: CFN export name for CloudFront distribution ID
+    source?: string;                // web: local source dir override (default ./dist)
+    noindexStages?: string[];       // web: stages that get an injected Disallow:/ robots.txt
+    value?: string;                 // resolved at runtime (S3 bucket name for web)
+    distributionValue?: string;     // web: resolved at runtime (CloudFront distribution ID)
 }
 
 export interface FunctionConfig {
@@ -266,6 +270,21 @@ export interface WorkerFunctionResult {
 
 export interface WorkerResult {
     functions: WorkerFunctionResult[];
+}
+
+export interface WebExportResult {
+    name: string;
+    bucket: string;
+    distribution: string;
+    originPath: string;
+    invalidationId?: string;
+    fileCount: number;
+    totalBytes: number;
+    noindexInjected: boolean;
+}
+
+export interface WebResult {
+    exports: WebExportResult[];
 }
 
 // ─── Twilio Types ────────────────────────────────────────────────────────────
