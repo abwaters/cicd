@@ -339,6 +339,14 @@ export interface GitHubDeployment {
     createdAt: string;
 }
 
+export interface BranchStatus {
+    onMain: boolean;
+    isMainTip: boolean;
+    behindBy: number;
+    aheadBy: number;
+    status: 'identical' | 'behind' | 'ahead' | 'diverged' | 'unknown';
+}
+
 // ─── Info Command Types ──────────────────────────────────────────────────────
 
 export interface InfoApiDetail {

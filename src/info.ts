@@ -11,7 +11,8 @@ import {
     InfoWorkerResult,
     InfoTwilioResult,
     InfoGitHubResult,
-    GitHubDeployment
+    GitHubDeployment,
+    BranchStatus
 } from './types';
 
 import * as options from './shared/options';
@@ -63,11 +64,34 @@ async function main(): Promise<void> {
         return liveCommit === recent ? '' : `  (drift: most recent kept = ${recent})`;
     }
 
+    // Branch-status annotation: tip-of-main header + per-stage (main, current) /
+    // (main, N behind) / (off main). Silently no-ops if repo or gh unavailable.
+    const repo = await cicd.getConfig("repo");
+    const branchCache = new Map<string, BranchStatus | null>();
+    let mainTip: string | null = null;
+    if (repo && github.isGhAvailable()) {
+        mainTip = github.getBranchTip(repo, 'main');
+    }
+    function branchAnnotation(commit: string): string {
+        if (!repo || !mainTip) return '';
+        if (!commit || commit === 'not deployed' || commit.startsWith('error:')) return '';
+        if (!/^[0-9a-f]{7,40}$/i.test(commit)) return '';
+        if (!branchCache.has(commit)) {
+            branchCache.set(commit, github.getCommitBranchStatus(repo, commit, 'main'));
+        }
+        const s = branchCache.get(commit);
+        if (!s) return '';
+        if (s.isMainTip) return '  (main, current)';
+        if (s.onMain)    return `  (main, ${s.behindBy} behind)`;
+        return '  (off main)';
+    }
+
     if (computeMode === 'fargate') {
         // ── Fargate info flow ────────────────────────────────────────
         const fargateConfig = await cicd.resolveFargateConfig();
 
         console.log(`Collecting Fargate service information...`);
+        if (mainTip) console.log(`\nMain: ${mainTip}`);
         console.log(`\nStages:`);
 
         for (const stage of stages) {
@@ -85,7 +109,7 @@ async function main(): Promise<void> {
                 const commit = commitEnv?.value || imageTag;
 
                 const counts = `desired:${serviceInfo.desiredCount} running:${serviceInfo.runningCount} pending:${serviceInfo.pendingCount}`;
-                console.log(`  ${stage.stage.padEnd(15)} ${commit.padEnd(12)} ${counts}${driftLabel(stage.stage, commit)}`);
+                console.log(`  ${stage.stage.padEnd(15)} ${commit.padEnd(12)} ${counts}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
                 if (o.details) {
                     console.log(`    - service:    ${stage.service}`);
                     console.log(`    - task def:   ${serviceInfo.taskDefinitionArn}`);
@@ -98,7 +122,6 @@ async function main(): Promise<void> {
         }
 
         // GitHub Deployments
-        const repo = await cicd.getConfig("repo");
         if (repo) {
             const ghResults: InfoGitHubResult[] = [];
             for (const stage of stages) {
@@ -248,17 +271,19 @@ async function main(): Promise<void> {
     // ── Print summary ─────────────────────────────────────────────────
 
     // Stages
+    if (mainTip) console.log(`\nMain: ${mainTip}`);
     console.log(`\nStages:`);
     for(const [stageKey,stageEntry] of Object.entries(stagesInfo) ) {
         let commits = Object.keys(stageEntry.commits);
         commits = commits.map(c=>c.split('-')[1]);
         if( commits.length === 1 ) {
-            console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${driftLabel(stageKey, commits[0])}`);
+            console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${driftLabel(stageKey, commits[0])}${branchAnnotation(commits[0])}`);
         }else if( commits.length > 1 ) {
             // Mixed commits across this stage's APIs — flag any that disagree with most-recent kept.
             const recent = recentByStage.get(stageKey);
             const drift = recent && !commits.includes(recent) ? `  (drift: most recent kept = ${recent})` : '';
-            console.log(`  ${stageKey.padEnd(15)} ${commits.join(', ')}${drift}`);
+            const annotated = commits.map(c => `${c}${branchAnnotation(c)}`).join(', ');
+            console.log(`  ${stageKey.padEnd(15)} ${annotated}${drift}`);
         }else{
             console.log(`  ${stageKey.padEnd(15)} not deployed`);
         }
@@ -276,7 +301,8 @@ async function main(): Promise<void> {
     if (topicResults.length > 0) {
         console.log(`\nSNS Topics:`);
         for (const r of topicResults) {
-            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
+            const c = r.commit || '';
+            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}${branchAnnotation(c)}`);
         }
     }
 
@@ -284,7 +310,8 @@ async function main(): Promise<void> {
     if (queueResults.length > 0) {
         console.log(`\nSQS Queues:`);
         for (const r of queueResults) {
-            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}`);
+            const c = r.commit || '';
+            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}${branchAnnotation(c)}`);
         }
     }
 
@@ -295,7 +322,7 @@ async function main(): Promise<void> {
             const aliasList = Object.keys(r.commits);
             const label = aliasList.length === 0
                 ? 'none'
-                : aliasList.map(a => `${a}=${r.commits[a]}`).join(', ');
+                : aliasList.map(a => `${a}=${r.commits[a]}${branchAnnotation(r.commits[a])}`).join(', ');
             console.log(`  ${r.name.padEnd(45)} ${label}`);
         }
     }
@@ -324,7 +351,7 @@ async function main(): Promise<void> {
                 } catch (e: any) {
                     commit = `error: ${e.message}`;
                 }
-                console.log(`    ${stage.stage.padEnd(15)} ${commit}${driftLabel(stage.stage, commit)}`);
+                console.log(`    ${stage.stage.padEnd(15)} ${commit}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
             }
         }
     }
@@ -373,7 +400,6 @@ async function main(): Promise<void> {
     }
 
     // GitHub Deployments
-    const repo = await cicd.getConfig("repo");
     if (repo) {
         const ghResults: InfoGitHubResult[] = [];
         for (const stage of stages) {

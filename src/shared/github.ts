@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { GitHubDeployment } from '../types';
+import { GitHubDeployment, BranchStatus } from '../types';
 
 import * as logger from './logger';
 
@@ -116,9 +116,40 @@ function listDeployments(repo: string, environment: string, count: number = 5): 
     }
 }
 
+function getBranchTip(repo: string, branch: string): string | null {
+    if (!isGhAvailable()) return null;
+    try {
+        const result = ghApi('GET', `/repos/${repo}/branches/${branch}`);
+        return result.commit?.sha ? result.commit.sha.substring(0, 7) : null;
+    } catch (e: any) {
+        logger.verbose(`   - failed to get ${branch} tip: ${e.message}`);
+        return null;
+    }
+}
+
+function getCommitBranchStatus(repo: string, commit: string, branch: string): BranchStatus | null {
+    if (!isGhAvailable()) return null;
+    try {
+        const r = ghApi('GET', `/repos/${repo}/compare/${branch}...${commit}`);
+        const status = r.status as BranchStatus['status'];
+        return {
+            onMain: status === 'identical' || status === 'behind',
+            isMainTip: status === 'identical',
+            behindBy: r.behind_by || 0,
+            aheadBy: r.ahead_by || 0,
+            status,
+        };
+    } catch (e: any) {
+        logger.verbose(`   - failed to check branch status for ${commit}: ${e.message}`);
+        return null;
+    }
+}
+
 export {
     isGhAvailable,
     createDeployment,
     updateDeploymentStatus,
-    listDeployments
+    listDeployments,
+    getBranchTip,
+    getCommitBranchStatus
 };
