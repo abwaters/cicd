@@ -21,6 +21,21 @@ function getCurrentCommit(): string {
     }
 }
 
+// Track the active GitHub deployment so `main().catch()` can mark it failed
+// if an error escapes every inner try/catch. Otherwise a transient failure
+// during verify or summary leaves the deployment stuck at `in_progress`.
+const cleanupContext: { repo?: string; ghDeployment?: { id: number } | null } = {};
+
+function markDeploymentFailure(message: string): void {
+    if (cleanupContext.repo && cleanupContext.ghDeployment) {
+        try {
+            github.updateDeploymentStatus(cleanupContext.repo, cleanupContext.ghDeployment.id, 'failure', message);
+        } catch {
+            // swallow — best-effort cleanup
+        }
+    }
+}
+
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
@@ -64,6 +79,8 @@ async function main(): Promise<void> {
         ghDeployment = github.createDeployment(repo, commit, stage, `Deploy ${appAlias} to ${stage}`);
         if (ghDeployment) {
             github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Deploying ${appAlias}`);
+            cleanupContext.repo = repo;
+            cleanupContext.ghDeployment = ghDeployment;
         }
     }
 
@@ -156,6 +173,22 @@ async function main(): Promise<void> {
         if( processTwilio ) {
             twilioResult = await cicd.processTwilio(stage,dryRun);
         }
+
+        // ── Print summary ─────────────────────────────────────────────
+
+        const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult, web: webResults });
+        console.log(`\nSummary: ${parts.join(', ')}`);
+
+        // Verify deployment (skip in dry-run)
+        if (!dryRun) {
+            const verifyResult = await verify.verifyDeployment(stage, appAlias, commit);
+            verify.printVerificationResult(verifyResult);
+        }
+
+        // Update GitHub deployment status to success
+        if (repo && ghDeployment) {
+            github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Deployed ${appAlias} to ${stage}: ${parts.join(', ')}`);
+        }
     } catch (err: any) {
         // Update GitHub deployment status to failure
         if (repo && ghDeployment) {
@@ -164,27 +197,14 @@ async function main(): Promise<void> {
         throw err;
     }
 
-    // ── Print summary ─────────────────────────────────────────────────
-
-    const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult, web: webResults });
-    console.log(`\nSummary: ${parts.join(', ')}`);
-
-    // Verify deployment (skip in dry-run)
-    if (!dryRun) {
-        const verifyResult = await verify.verifyDeployment(stage, appAlias, commit);
-        verify.printVerificationResult(verifyResult);
-    }
-
-    // Update GitHub deployment status to success
-    if (repo && ghDeployment) {
-        github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Deployed ${appAlias} to ${stage}: ${parts.join(', ')}`);
-    }
-
     console.log();
     console.timeEnd("api cicd");
 }
 
 main().catch(err => {
+    // Safety net: if an error escaped every inner try/catch, still mark the
+    // GitHub deployment failed so it doesn't sit at `in_progress` forever.
+    markDeploymentFailure(err.message || 'Deployment failed');
     if (isNetworkError(err)) {
         console.error(`\nDeployment failed: ${describeNetworkError(err)}`);
     } else {
