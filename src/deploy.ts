@@ -70,6 +70,21 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
     const repo = await cicd.getConfig("repo");
 
+    // Idempotency guard: if the requested commit is already the current
+    // successful deployment for this stage, treat it as a no-op success
+    // rather than re-running the pipeline. Skipped on --dry-run, when
+    // --force is given, or when no `repo` is configured.
+    if (repo && !dryRun && !o.force) {
+        const recent = github.listDeployments(repo, stage, 10);
+        const current = recent.find((d: any) => d.status === 'success');
+        if (current && current.ref === commit) {
+            const deployedAt = current.createdAt.slice(0, 16).replace('T', ' ') + ' UTC';
+            console.log(`Commit '${commit}' is already deployed to '${stage}' (${deployedAt}).`);
+            console.log(`No action needed. Use --force to redeploy.`);
+            process.exit(0);
+        }
+    }
+
     const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
     console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]${dryRunLabel}...`);
 
