@@ -70,6 +70,20 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
     const repo = await cicd.getConfig("repo");
 
+    // Immutability guard: refuse to redeploy the commit that's already the current
+    // successful deployment for this stage. Mirrors rollback.ts:95-98. Skipped on
+    // dry-run, when --force is given, or when no `repo` is configured (no
+    // authoritative deployment history available without GitHub).
+    if (repo && !dryRun && !o.force) {
+        const recent = github.listDeployments(repo, stage, 10);
+        const current = recent.find((d: any) => d.status === 'success');
+        if (current && current.ref === commit) {
+            console.error(`Error: Commit '${commit}' is already the current successful deployment on '${stage}' (deployed ${current.createdAt}).`);
+            console.error(`Releases are immutable; use --force to redeploy anyway.`);
+            process.exit(1);
+        }
+    }
+
     const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
     console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]${dryRunLabel}...`);
 
