@@ -70,7 +70,7 @@ Commands:
                               Options: --verbose
 
   info [options]              Show current deployments for all stages
-                              Options: --details, --verbose
+                              Options: --verbose, --no-header
 
   rollback <stage> [commit]   Rollback a stage to a previous deployment
                               Options: --env, --api, --sns, --sqs, --workers, --web,
@@ -98,7 +98,7 @@ Examples:
   ${cmd} deploy prod abc123 --api
   ${cmd} deploy staging abc123 --verbose
   ${cmd} clean --verbose
-  ${cmd} info --details
+  ${cmd} info --verbose
   ${cmd} validate
 `);
 }
