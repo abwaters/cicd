@@ -38,6 +38,9 @@ async function main(): Promise<void> {
     const o = options.getOptions(args);
     args = options.stripOptions(args);
 
+    // --details is a legacy alias for --verbose; keep it working silently.
+    if (o.details) o.verbose = true;
+
     // Set verbose mode if requested
     if (o.verbose) {
         logger.setVerbose(true);
@@ -86,12 +89,44 @@ async function main(): Promise<void> {
         return '  (off main)';
     }
 
+    // Compact-symbol equivalents used in the default (non-verbose) display.
+    // Tracks whether any symbol was ever emitted so we know to print the legend.
+    let symbolUsed = false;
+    function branchSymbol(commit: string): string {
+        if (!repo || !mainTip) return '';
+        if (!commit || commit === 'not deployed' || commit.startsWith('error:')) return '';
+        if (!/^[0-9a-f]{7,40}$/i.test(commit)) return '';
+        if (!branchCache.has(commit)) {
+            branchCache.set(commit, github.getCommitBranchStatus(repo, commit, 'main'));
+        }
+        const s = branchCache.get(commit);
+        if (!s) return '';
+        if (s.isMainTip) { symbolUsed = true; return '*'; }
+        if (s.onMain)    { symbolUsed = true; return `↓${s.behindBy}`; }
+        symbolUsed = true; return '!';
+    }
+    function driftSymbol(stageName: string, liveCommit: string): string {
+        const recent = recentByStage.get(stageName);
+        if (!recent || !liveCommit || liveCommit === 'not deployed') return '';
+        if (liveCommit === recent) return '';
+        symbolUsed = true;
+        return '~';
+    }
+    function composeSymbols(stageName: string, commit: string): string {
+        const parts = [branchSymbol(commit), driftSymbol(stageName, commit)].filter(Boolean);
+        return parts.length ? ' ' + parts.join(' ') : '';
+    }
+    function printLegend(): void {
+        if (!symbolUsed) return;
+        console.log(`\nLegend: * main-current  ↓N N behind  ! off main  ~ drift`);
+    }
+
     if (computeMode === 'fargate') {
         // ── Fargate info flow ────────────────────────────────────────
         const fargateConfig = await cicd.resolveFargateConfig();
 
-        console.log(`Collecting Fargate service information...`);
-        if (mainTip) console.log(`\nMain: ${mainTip}`);
+        if (o.verbose) console.log(`Collecting Fargate service information...`);
+        if (o.verbose && mainTip) console.log(`\nMain: ${mainTip}`);
         console.log(`\nStages:`);
 
         for (const stage of stages) {
@@ -108,21 +143,23 @@ async function main(): Promise<void> {
                 const commitEnv = (container?.environment || []).find((e: any) => e.name === 'COMMIT');
                 const commit = commitEnv?.value || imageTag;
 
-                const counts = `desired:${serviceInfo.desiredCount} running:${serviceInfo.runningCount} pending:${serviceInfo.pendingCount}`;
-                console.log(`  ${stage.stage.padEnd(15)} ${commit.padEnd(12)} ${counts}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
-                if (o.details) {
+                if (o.verbose) {
+                    const counts = `desired:${serviceInfo.desiredCount} running:${serviceInfo.runningCount} pending:${serviceInfo.pendingCount}`;
+                    console.log(`  ${stage.stage.padEnd(15)} ${commit.padEnd(12)} ${counts}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
                     console.log(`    - service:    ${stage.service}`);
                     console.log(`    - task def:   ${serviceInfo.taskDefinitionArn}`);
                     console.log(`    - image:      ${container?.image || 'unknown'}`);
                     console.log(`    - status:     ${serviceInfo.status}`);
+                } else {
+                    console.log(`  ${stage.stage.padEnd(15)} ${commit}${composeSymbols(stage.stage, commit)}`);
                 }
             } catch (e: any) {
                 console.log(`  ${stage.stage.padEnd(15)} error: ${e.message}`);
             }
         }
 
-        // GitHub Deployments
-        if (repo) {
+        // GitHub Deployments (verbose only)
+        if (o.verbose && repo) {
             const ghResults: InfoGitHubResult[] = [];
             for (const stage of stages) {
                 const deployments: GitHubDeployment[] = github.listDeployments(repo, stage.stage, 5);
@@ -142,13 +179,14 @@ async function main(): Promise<void> {
             }
         }
 
+        if (!o.verbose) printLegend();
         console.log();
         console.timeEnd("api cicd");
         return;
     }
 
     // ── Lambda info flow (existing behavior) ────────────────────────
-    console.log(`Collecting information for stages...`);
+    if (o.verbose) console.log(`Collecting information for stages...`);
     const apis: ExportConfig[] = await cicd.getExportsByType('api');
     const topics: ExportConfig[] = await cicd.getExportsByType('sns');
     const queues: ExportConfig[] = await cicd.getExportsByType('sqs');
@@ -189,7 +227,7 @@ async function main(): Promise<void> {
             }
             stagesInfo[stagename].details.push(apiInfo);
             stagesInfo[stagename].functions = [];
-            if( o.details ) {
+            if( o.verbose ) {
                 for(const f of functions) {
                     const finfo = {
                         name: f.value!,
@@ -270,154 +308,177 @@ async function main(): Promise<void> {
 
     // ── Print summary ─────────────────────────────────────────────────
 
+    const widest = (names: string[]) => Math.max(0, ...names.map(n => n.length));
+
     // Stages
-    if (mainTip) console.log(`\nMain: ${mainTip}`);
+    if (o.verbose && mainTip) console.log(`\nMain: ${mainTip}`);
     console.log(`\nStages:`);
     for(const [stageKey,stageEntry] of Object.entries(stagesInfo) ) {
         let commits = Object.keys(stageEntry.commits);
         commits = commits.map(c=>c.split('-')[1]);
-        if( commits.length === 1 ) {
-            console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${driftLabel(stageKey, commits[0])}${branchAnnotation(commits[0])}`);
-        }else if( commits.length > 1 ) {
-            // Mixed commits across this stage's APIs — flag any that disagree with most-recent kept.
-            const recent = recentByStage.get(stageKey);
-            const drift = recent && !commits.includes(recent) ? `  (drift: most recent kept = ${recent})` : '';
-            const annotated = commits.map(c => `${c}${branchAnnotation(c)}`).join(', ');
-            console.log(`  ${stageKey.padEnd(15)} ${annotated}${drift}`);
-        }else{
-            console.log(`  ${stageKey.padEnd(15)} not deployed`);
-        }
-        if( o.details ) {
+        if (o.verbose) {
+            if( commits.length === 1 ) {
+                console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${driftLabel(stageKey, commits[0])}${branchAnnotation(commits[0])}`);
+            }else if( commits.length > 1 ) {
+                // Mixed commits across this stage's APIs — flag any that disagree with most-recent kept.
+                const recent = recentByStage.get(stageKey);
+                const drift = recent && !commits.includes(recent) ? `  (drift: most recent kept = ${recent})` : '';
+                const annotated = commits.map(c => `${c}${branchAnnotation(c)}`).join(', ');
+                console.log(`  ${stageKey.padEnd(15)} ${annotated}${drift}`);
+            }else{
+                console.log(`  ${stageKey.padEnd(15)} not deployed`);
+            }
             const funcs = stageEntry.functions;
-            for(const f of funcs) {
-                const funcName = f.name;
-                const funcVersion = f.commit.includes('-')?f.commit.split('-')[1]:f.commit;
-                console.log(`    - ${funcName.padEnd(35)} ${funcVersion}`);
+            if (funcs.length > 0) {
+                const funcWidth = widest(funcs.map(f => f.name));
+                for(const f of funcs) {
+                    const funcVersion = f.commit.includes('-')?f.commit.split('-')[1]:f.commit;
+                    console.log(`    - ${f.name.padEnd(funcWidth)}  ${funcVersion}`);
+                }
+            }
+        } else {
+            if (commits.length === 1) {
+                console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${composeSymbols(stageKey, commits[0])}`);
+            } else if (commits.length > 1) {
+                const recent = recentByStage.get(stageKey);
+                const driftMark = recent && !commits.includes(recent) ? ' ~' : '';
+                const annotated = commits.map(c => `${c}${composeSymbols(stageKey, c)}`).join(', ');
+                if (driftMark) symbolUsed = true;
+                console.log(`  ${stageKey.padEnd(15)} ${annotated}${driftMark}`);
+            } else {
+                console.log(`  ${stageKey.padEnd(15)} not deployed`);
             }
         }
     }
 
-    // SNS Topics
-    if (topicResults.length > 0) {
-        console.log(`\nSNS Topics:`);
-        for (const r of topicResults) {
-            const c = r.commit || '';
-            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}${branchAnnotation(c)}`);
+    if (o.verbose) {
+        // SNS Topics
+        if (topicResults.length > 0) {
+            console.log(`\nSNS Topics:`);
+            const w = widest(topicResults.map(r => r.name));
+            for (const r of topicResults) {
+                const c = r.commit || '';
+                console.log(`  ${r.name.padEnd(w)}  ${r.commit || 'none'}${branchAnnotation(c)}`);
+            }
         }
-    }
 
-    // SQS Queues
-    if (queueResults.length > 0) {
-        console.log(`\nSQS Queues:`);
-        for (const r of queueResults) {
-            const c = r.commit || '';
-            console.log(`  ${r.name.padEnd(45)} ${r.commit || 'none'}${branchAnnotation(c)}`);
+        // SQS Queues
+        if (queueResults.length > 0) {
+            console.log(`\nSQS Queues:`);
+            const w = widest(queueResults.map(r => r.name));
+            for (const r of queueResults) {
+                const c = r.commit || '';
+                console.log(`  ${r.name.padEnd(w)}  ${r.commit || 'none'}${branchAnnotation(c)}`);
+            }
         }
-    }
 
-    // Workers
-    if (workerResults.length > 0) {
-        console.log(`\nWorkers:`);
-        for (const r of workerResults) {
-            const aliasList = Object.keys(r.commits);
-            const label = aliasList.length === 0
-                ? 'none'
-                : aliasList.map(a => `${a}=${r.commits[a]}${branchAnnotation(r.commits[a])}`).join(', ');
-            console.log(`  ${r.name.padEnd(45)} ${label}`);
+        // Workers
+        if (workerResults.length > 0) {
+            console.log(`\nWorkers:`);
+            const w = widest(workerResults.map(r => r.name));
+            for (const r of workerResults) {
+                const aliasList = Object.keys(r.commits);
+                const label = aliasList.length === 0
+                    ? 'none'
+                    : aliasList.map(a => `${a}=${r.commits[a]}${branchAnnotation(r.commits[a])}`).join(', ');
+                console.log(`  ${r.name.padEnd(w)}  ${label}`);
+            }
         }
-    }
 
-    // Web (S3 + CloudFront)
-    const webExports: ExportConfig[] = await cicd.getExportsByType('web');
-    if (webExports.length > 0) {
-        console.log(`\nWeb:`);
-        for (const w of webExports) {
-            const distribution = w.distributionValue!;
-            console.log(`  ${w.name}  (distribution ${distribution})`);
+        // Web (S3 + CloudFront)
+        const webExports: ExportConfig[] = await cicd.getExportsByType('web');
+        if (webExports.length > 0) {
+            console.log(`\nWeb:`);
+            for (const w of webExports) {
+                const distribution = w.distributionValue!;
+                console.log(`  ${w.name}  (distribution ${distribution})`);
+                for (const stage of stages) {
+                    if (w.stages && !w.stages.includes(stage.stage)) continue;
+                    let commit = 'not deployed';
+                    try {
+                        const originPath = await cloudfront.getOriginPath(distribution, stage.stage);
+                        if (originPath) {
+                            const parts = originPath.split('/').filter(p => p);
+                            if (parts.length >= 2 && parts[0] === stage.stage) {
+                                commit = parts[1];
+                            } else {
+                                commit = originPath;
+                            }
+                        }
+                    } catch (e: any) {
+                        commit = `error: ${e.message}`;
+                    }
+                    console.log(`    ${stage.stage.padEnd(15)} ${commit}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
+                }
+            }
+        }
+
+        // Twilio Phone Numbers & Messaging Services
+        const twilioResults: InfoTwilioResult[] = [];
+        const accountSid = process.env.TWILIO_ACCOUNT_SID;
+        const authToken = process.env.TWILIO_AUTH_TOKEN;
+        if (accountSid && authToken) {
             for (const stage of stages) {
-                if (w.stages && !w.stages.includes(stage.stage)) continue;
-                let commit = 'not deployed';
-                try {
-                    const originPath = await cloudfront.getOriginPath(distribution, stage.stage);
-                    if (originPath) {
-                        // Path shape: /{stage}/{commit}
-                        const parts = originPath.split('/').filter(p => p);
-                        if (parts.length >= 2 && parts[0] === stage.stage) {
-                            commit = parts[1];
-                        } else {
-                            commit = originPath;
+                if (stage.twilio) {
+                    let sid = stage.twilio.messagingSid;
+                    if (sid.startsWith('!')) {
+                        sid = await cicd.resolveVariable(sid);
+                        if (!sid) {
+                            logger.verbose(`   - Could not resolve Twilio messagingSid for stage ${stage.stage}, skipping`);
+                            continue;
                         }
                     }
-                } catch (e: any) {
-                    commit = `error: ${e.message}`;
+                    if (twilio.isMessagingServiceSid(sid)) {
+                        try {
+                            const svc = await twilio.getMessagingService(accountSid, authToken, sid);
+                            twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
+                        } catch (e: any) {
+                            logger.verbose(`   - Error fetching messaging service ${sid}: ${e.message}`);
+                            twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'messaging-service' });
+                        }
+                    } else {
+                        try {
+                            const phone = await twilio.getPhoneNumber(accountSid, authToken, sid);
+                            twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
+                        } catch (e: any) {
+                            logger.verbose(`   - Error fetching phone number ${sid}: ${e.message}`);
+                            twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'phone-number' });
+                        }
+                    }
                 }
-                console.log(`    ${stage.stage.padEnd(15)} ${commit}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
             }
         }
-    }
+        if (twilioResults.length > 0) {
+            console.log(`\nTwilio:`);
+            const labelWidth = widest(twilioResults.map(r => r.label));
+            for (const r of twilioResults) {
+                const typeTag = r.type === 'messaging-service' ? '[svc] ' : '[num] ';
+                console.log(`  ${r.stage.padEnd(15)} ${typeTag}${r.label.padEnd(labelWidth)}  ${r.webhookUrl}`);
+            }
+        }
 
-    // Twilio Phone Numbers & Messaging Services
-    const twilioResults: InfoTwilioResult[] = [];
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (accountSid && authToken) {
-        for (const stage of stages) {
-            if (stage.twilio) {
-                let sid = stage.twilio.messagingSid;
-                if (sid.startsWith('!')) {
-                    sid = await cicd.resolveVariable(sid);
-                    if (!sid) {
-                        logger.verbose(`   - Could not resolve Twilio messagingSid for stage ${stage.stage}, skipping`);
-                        continue;
-                    }
+        // GitHub Deployments
+        if (repo) {
+            const ghResults: InfoGitHubResult[] = [];
+            for (const stage of stages) {
+                const deployments: GitHubDeployment[] = github.listDeployments(repo, stage.stage, 5);
+                if (deployments.length > 0) {
+                    ghResults.push({ stage: stage.stage, deployments });
                 }
-                if (twilio.isMessagingServiceSid(sid)) {
-                    try {
-                        const svc = await twilio.getMessagingService(accountSid, authToken, sid);
-                        twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
-                    } catch (e: any) {
-                        logger.verbose(`   - Error fetching messaging service ${sid}: ${e.message}`);
-                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'messaging-service' });
-                    }
-                } else {
-                    try {
-                        const phone = await twilio.getPhoneNumber(accountSid, authToken, sid);
-                        twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
-                    } catch (e: any) {
-                        logger.verbose(`   - Error fetching phone number ${sid}: ${e.message}`);
-                        twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'phone-number' });
+            }
+            if (ghResults.length > 0) {
+                console.log(`\nGitHub Deployments:`);
+                for (const r of ghResults) {
+                    console.log(`  ${r.stage}:`);
+                    for (const d of r.deployments) {
+                        const ts = new Date(d.createdAt).toLocaleString();
+                        console.log(`    ${d.ref.padEnd(10)} ${d.status.padEnd(12)} ${ts}`);
                     }
                 }
             }
         }
-    }
-    if (twilioResults.length > 0) {
-        console.log(`\nTwilio:`);
-        for (const r of twilioResults) {
-            const typeTag = r.type === 'messaging-service' ? '[svc] ' : '[num] ';
-            console.log(`  ${r.stage.padEnd(15)} ${typeTag}${r.label.padEnd(20)} ${r.webhookUrl}`);
-        }
-    }
-
-    // GitHub Deployments
-    if (repo) {
-        const ghResults: InfoGitHubResult[] = [];
-        for (const stage of stages) {
-            const deployments: GitHubDeployment[] = github.listDeployments(repo, stage.stage, 5);
-            if (deployments.length > 0) {
-                ghResults.push({ stage: stage.stage, deployments });
-            }
-        }
-        if (ghResults.length > 0) {
-            console.log(`\nGitHub Deployments:`);
-            for (const r of ghResults) {
-                console.log(`  ${r.stage}:`);
-                for (const d of r.deployments) {
-                    const ts = new Date(d.createdAt).toLocaleString();
-                    console.log(`    ${d.ref.padEnd(10)} ${d.status.padEnd(12)} ${ts}`);
-                }
-            }
-        }
+    } else {
+        printLegend();
     }
 
     console.log();
