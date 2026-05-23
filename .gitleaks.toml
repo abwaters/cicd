@@ -1,0 +1,19 @@
+# gitleaks config — extends the default ruleset
+# https://github.com/gitleaks/gitleaks
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-specific allowlist"
+paths = [
+  '''cicd\.example\.json''',
+  '''cicd\.schema\.json''',
+  '''package-lock\.json''',
+  '''test/.*''',
+]
+# Placeholder values used in docs, examples, and tests
+regexes = [
+  '''123456789012''',
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+]
