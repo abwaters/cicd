@@ -1,0 +1,70 @@
+{
+  "app": "myapp",
+  "account": "123456789012",
+  "region": "us-east-1",
+  "repo": "myorg/myapp",
+  "throttle": {
+    "rateLimit": 100,
+    "burstLimit": 200
+  },
+  "environment": {
+    "DDB_ORDERS_TABLE_NAME": "!ImportValue myapp-orders-table",
+    "DDB_CUSTOMERS_TABLE_NAME": "!ImportValue myapp-customers-table",
+    "API_SIGNING_SECRET": "!ParameterStore /myapp/prod/api_signing_secret",
+    "LOG_LEVEL": "!SetEnv LOG_LEVEL"
+  },
+  "exports": [
+    {
+      "type": "api",
+      "name": "myapp-orders-api",
+      "path": "orders",
+      "functions": [
+        {"name": "myapp-orders-get-function", "method": "GET", "env": "DDB_ORDERS_TABLE_NAME,LOG_LEVEL"},
+        {"name": "myapp-orders-create-function", "method": "POST", "env": "DDB_ORDERS_TABLE_NAME,API_SIGNING_SECRET,LOG_LEVEL"}
+      ]
+    },
+    {
+      "type": "api",
+      "name": "myapp-customers-api",
+      "path": "customers",
+      "throttle": {
+        "rateLimit": 10,
+        "burstLimit": 20
+      },
+      "functions": [
+        {"name": "myapp-customers-function", "method": "GET", "env": "DDB_CUSTOMERS_TABLE_NAME"}
+      ]
+    },
+    {
+      "type": "sns",
+      "name": "myapp-order-events-topic",
+      "stages": ["prod"],
+      "functions": [
+        {"name": "myapp-order-events-function", "method": "POST", "env": "DDB_ORDERS_TABLE_NAME,LOG_LEVEL"}
+      ]
+    }
+  ],
+  "stages": [
+    {
+      "stage": "prod",
+      "throttle": {
+        "rateLimit": 1000,
+        "burstLimit": 2000
+      },
+      "mapping": {
+        "domain": "api.example.com",
+        "path": ""
+      },
+      "environment": {
+        "LOG_LEVEL": "!SetEnv PROD_LOG_LEVEL"
+      }
+    },
+    {
+      "stage": "staging",
+      "mapping": {
+        "domain": "api.example.com",
+        "path": "staging"
+      }
+    }
+  ]
+}
