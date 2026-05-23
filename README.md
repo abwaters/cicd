@@ -42,7 +42,11 @@ node src/index.js clean
 
 ## Configuration
 
-The deployment system is driven by `cicd.json`, which defines your AWS infrastructure and deployment configuration.
+The deployment system is driven by `cicd.json`, which defines your AWS infrastructure and deployment configuration. A reference file is provided at `cicd.example.json` — copy it to `cicd.json` and edit:
+
+```bash
+cp cicd.example.json cicd.json
+```
 
 ### Configuration Validation
 
@@ -313,4 +317,4 @@ This allows multiple versions to coexist and enables easy rollback via the `roll
 
 ## License
 
-ISC
+MIT — see [LICENSE](LICENSE).

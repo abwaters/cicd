@@ -32,7 +32,13 @@ You'll see a validation error since there's no `cicd.json` yet — that's expect
 
 ## 2. Create Your First `cicd.json`
 
-Start with the skeleton. Every config needs an app name, AWS account, region, and at least one export and stage:
+The repo ships with `cicd.example.json` as a starting point. You can either copy it and edit:
+
+```bash
+cp cicd.example.json cicd.json
+```
+
+…or start from the skeleton below. Every config needs an app name, AWS account, region, and at least one export and stage:
 
 ```json
 {
