@@ -6,15 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-05-24
+
 ### Added
 - OSS readiness: MIT `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue and PR templates, and this changelog.
 - `cicd.example.json` as a starting point for new users.
 - Plugin architecture for non-AWS-native integrations: `CICDPlugin` interface, `loadPlugins()` loader, `runPlugins()` dispatcher, top-level `plugins: string[]` in `cicd.json`, and runtime JSON-Schema merging of plugin-contributed `stages[].<key>` fragments. See `src/shared/plugin.ts`.
-- New reference plugin package `@abwaters/cicd-plugin-twilio` (in `plugins/twilio/`) — Twilio webhook updates are now opt-in via this plugin.
+- New reference plugin package [`@abwaters/cicd-plugin-twilio`](https://github.com/abwaters/cicd-plugin-twilio) — Twilio webhook updates are now opt-in via this plugin.
 
 ### Changed
 - `package.json` `license` field switched from `ISC` to `MIT`.
-- Twilio support extracted from core into the `@abwaters/cicd-plugin-twilio` plugin. Stage configs that still have `stages[].twilio` but no `"plugins"` array now fail validation with a targeted hint pointing at the plugin install command.
+- Twilio support extracted from core into the `@abwaters/cicd-plugin-twilio` plugin (lives in its own repo). Stage configs that still have `stages[].twilio` but no `"plugins"` array now fail validation with a targeted hint pointing at the plugin install command.
 - `resolveScope()` no longer hardcodes Twilio; the `--no-<pluginName>` flag is derived from each loaded plugin's name (or its declared `scopeFlag`).
 - `printDeploymentSummary()` accepts `pluginResults: PluginResult[]` instead of a hardcoded `twilio` field; plugins fully own their rendering.
 

@@ -304,7 +304,6 @@ This allows multiple versions to coexist and enables easy rollback via the `roll
 - **src/shared/github.js**: GitHub Deployments API wrapper
 - **src/shared/plugin.ts** / **plugins.ts** / **plugin-runner.ts**: Plugin system (loader, runner, types)
 - **src/shared/credentials.ts**: AWS credential validation
-- **plugins/twilio/**: Reference plugin (`@abwaters/cicd-plugin-twilio`) — optional Twilio webhook integration
 - **src/shared/logger.ts**: Logging utility with verbose mode
 - **src/shared/utils.ts**: Sleep/rate limiting utilities
 - **src/shared/header.ts**: CLI header display
@@ -314,7 +313,7 @@ This allows multiple versions to coexist and enables easy rollback via the `roll
 - AWS SDK v3 clients for Lambda, API Gateway, SNS, CloudFormation, SSM, and STS
 - AJV for JSON schema validation
 - GitHub CLI (`gh`) for deployment tracking (optional, used by deploy/rollback)
-- Twilio integration via the optional plugin package [`@abwaters/cicd-plugin-twilio`](plugins/twilio/) — install separately and list in `cicd.json` under `"plugins"`
+- Twilio integration via the optional plugin package [`@abwaters/cicd-plugin-twilio`](https://github.com/abwaters/cicd-plugin-twilio) — install separately and list in `cicd.json` under `"plugins"`
 
 ## License
 

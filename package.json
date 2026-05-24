@@ -1,6 +1,6 @@
 {
   "name": "@abwaters/cicd",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AWS CI/CD deployment tool for Lambda, API Gateway, and SNS",
   "license": "MIT",
   "author": "",

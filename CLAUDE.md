@@ -133,7 +133,7 @@ Non-AWS-native integrations (e.g., Twilio) live in separate npm packages and are
 - An `info` handler invoked by info.ts in verbose mode
 - An optional `scopeFlag` (default `no<Name>`) to skip the plugin for a single invocation
 
-The Twilio integration is the reference plugin and lives at `plugins/twilio/` in this repo, published as `@abwaters/cicd-plugin-twilio`.
+The Twilio integration is the reference plugin and lives in its own repo at [`abwaters/cicd-plugin-twilio`](https://github.com/abwaters/cicd-plugin-twilio), published to GitHub Packages as `@abwaters/cicd-plugin-twilio`.
 
 ### Rate Limiting
 
