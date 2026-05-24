@@ -250,7 +250,7 @@ async function main(): Promise<void> {
         }
 
         if (processWeb) {
-            webResults = await cicd.processWeb(stage, appAlias, commit, webFilter, dryRun);
+            webResults = await cicd.processWebRollback(stage, commit, webFilter, dryRun);
         }
 
         if (plugins.length > 0) {
