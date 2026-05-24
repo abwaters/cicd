@@ -48,7 +48,7 @@ async function main(): Promise<void> {
         logger.log('Verbose mode enabled');
     }
 
-    console.time("cicd");
+    console.time("info");
     if (!o.noHeader) printHeader();
 
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
 
         if (!o.verbose) printLegend();
         console.log();
-        console.timeEnd("cicd");
+        console.timeEnd("info");
         return;
     }
 
@@ -485,7 +485,7 @@ async function main(): Promise<void> {
     }
 
     console.log();
-    console.timeEnd("cicd");
+    console.timeEnd("info");
 }
 
 main().catch(err => {

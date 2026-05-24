@@ -35,7 +35,7 @@ async function main(): Promise<void> {
 
     await cicd.setStageConfig(stage);
 
-    console.time("cicd");
+    console.time("restart");
     if (!o.noHeader) printHeader();
 
     console.log(`Force restarting '${stage}' stage...`);
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     }
 
     console.log();
-    console.timeEnd("cicd");
+    console.timeEnd("restart");
 }
 
 main().catch(err => {
