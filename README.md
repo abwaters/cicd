@@ -1,5 +1,9 @@
 # cicd
 
+[![CI](https://img.shields.io/github/actions/workflow/status/abwaters/cicd/ci.yml?branch=main&label=CI)](https://github.com/abwaters/cicd/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/package-json/v/abwaters/cicd)](https://github.com/abwaters/cicd/blob/main/package.json)
+[![License](https://img.shields.io/github/license/abwaters/cicd)](LICENSE)
+
 Custom AWS CI/CD deployment tool for managing Lambda functions, API Gateway, and SNS resources.
 
 ## Installation
