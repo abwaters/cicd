@@ -1,4 +1,4 @@
-import { resolveScope, scopeLabel } from '../src/shared/scope';
+import { resolveScope, scopeLabel, deployTargetLabel } from '../src/shared/scope';
 import { CICDPlugin } from '../src/shared/plugin';
 
 const twilioPlugin: CICDPlugin = { name: 'twilio', scopeFlag: 'noTwilio' };
@@ -130,5 +130,53 @@ describe('scopeLabel', () => {
     it('renders Web filter in label when set (with Environment prefix)', () => {
         const label = scopeLabel(resolveScope({ web: true, webFilter: 'site' }));
         expect(label).toBe('Environment + Web (site)');
+    });
+});
+
+describe('deployTargetLabel', () => {
+    it('returns fargate regardless of scope/exports', () => {
+        const label = deployTargetLabel(resolveScope({}), { computeMode: 'fargate', exportTypes: ['api'], hasWorkers: true });
+        expect(label).toBe('fargate');
+    });
+
+    it('web-only project full deploy reports [web], not [lambda]', () => {
+        const label = deployTargetLabel(resolveScope({}), { computeMode: 'lambda', exportTypes: ['web'], hasWorkers: false });
+        expect(label).toBe('web');
+    });
+
+    it('mixed api+web project reports api+web', () => {
+        const label = deployTargetLabel(resolveScope({}), { computeMode: 'lambda', exportTypes: ['api', 'web'], hasWorkers: false });
+        expect(label).toBe('api+web');
+    });
+
+    it('only reports kinds that are in scope', () => {
+        const label = deployTargetLabel(resolveScope({ web: true }), { computeMode: 'lambda', exportTypes: ['api', 'web'], hasWorkers: false });
+        expect(label).toBe('web');
+    });
+
+    it('includes workers when configured and in scope', () => {
+        const label = deployTargetLabel(resolveScope({}), { computeMode: 'lambda', exportTypes: ['api'], hasWorkers: true });
+        expect(label).toBe('api+workers');
+    });
+
+    it('env-only deploy reports env', () => {
+        const label = deployTargetLabel(resolveScope({ env: true }), { computeMode: 'lambda', exportTypes: ['api'], hasWorkers: false });
+        expect(label).toBe('env');
+    });
+
+    it('reports env when nothing configured matches but env is on', () => {
+        const label = deployTargetLabel(resolveScope({}), { computeMode: 'lambda', exportTypes: [], hasWorkers: false });
+        expect(label).toBe('env');
+    });
+
+    it('falls back to lambda when neither resources nor env are in scope', () => {
+        const emptyScope = { ...resolveScope({ env: true }), processEnv: false };
+        const label = deployTargetLabel(emptyScope, { computeMode: 'lambda', exportTypes: [], hasWorkers: false });
+        expect(label).toBe('lambda');
+    });
+
+    it('preserves canonical order api+sns+sqs+workers+web', () => {
+        const label = deployTargetLabel(resolveScope({}), { computeMode: 'lambda', exportTypes: ['web', 'sqs', 'sns', 'api'], hasWorkers: true });
+        expect(label).toBe('api+sns+sqs+workers+web');
     });
 });
