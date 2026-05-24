@@ -73,6 +73,27 @@ export function resolveScope(o: CLIOptions, plugins: CICDPlugin[] = []): DeployS
     };
 }
 
+// Short bracket-label for the deploy header, e.g. [web], [api+web], [fargate].
+// Reflects what this invocation will actually touch: the resource kinds that
+// are both configured and in scope. Falls back to 'env' for an env-only deploy
+// and 'lambda' when nothing is configured.
+export function deployTargetLabel(
+    scope: DeployScope,
+    opts: { computeMode: string; exportTypes: string[]; hasWorkers: boolean }
+): string {
+    if (opts.computeMode === 'fargate') return 'fargate';
+    const present = new Set(opts.exportTypes);
+    const kinds: string[] = [];
+    if (scope.processApi && present.has('api')) kinds.push('api');
+    if (scope.processSns && present.has('sns')) kinds.push('sns');
+    if (scope.processSqs && present.has('sqs')) kinds.push('sqs');
+    if (scope.processWorkers && opts.hasWorkers) kinds.push('workers');
+    if (scope.processWeb && present.has('web')) kinds.push('web');
+    if (kinds.length) return kinds.join('+');
+    if (scope.processEnv) return 'env';
+    return 'lambda';
+}
+
 export function scopeLabel(scope: DeployScope): string {
     const parts: string[] = [];
     if (scope.processEnv && !scope.processApi && !scope.processSns && !scope.processSqs && !scope.processWorkers && !scope.processWeb && scope.enabledPluginNames.length === 0) {
