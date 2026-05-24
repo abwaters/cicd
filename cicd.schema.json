@@ -285,6 +285,14 @@
         ]
       }
     },
+    "plugins": {
+      "type": "array",
+      "description": "Plugin module names to load at runtime (e.g., @abwaters/cicd-plugin-twilio). Each plugin can contribute its own stages[] schema fragment.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "stages": {
       "type": "array",
       "description": "Deployment stages with custom domain mappings and environment overrides",
@@ -338,24 +346,6 @@
                 "description": "Maximum burst capacity",
                 "minimum": 0,
                 "maximum": 10000
-              }
-            },
-            "additionalProperties": false
-          },
-          "twilio": {
-            "type": "object",
-            "description": "Twilio webhook configuration for this stage. Accepts a phone number SID (PNxxxxxxxx) or messaging service SID (MGxxxxxxxx).",
-            "required": ["messagingSid", "smsWebhookApi"],
-            "properties": {
-              "messagingSid": {
-                "type": "string",
-                "description": "Twilio phone number SID (PNxxxxxxxx) or messaging service SID (MGxxxxxxxx)",
-                "pattern": "^(PN|MG)[a-f0-9]{32}$"
-              },
-              "smsWebhookApi": {
-                "type": "string",
-                "description": "Name of the API export to use for building the SMS webhook URL",
-                "minLength": 1
               }
             },
             "additionalProperties": false

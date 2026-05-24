@@ -1,7 +1,10 @@
 import { execSync } from 'child_process';
-import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, FargateDeployResult, WebResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope } from './shared/scope';
+import { loadPlugins } from './shared/plugins';
+import { runPlugins } from './shared/plugin-runner';
+import { PluginResult } from './shared/plugin';
 
 import * as verify from './shared/verify';
 import * as cicd from './shared/cicd';
@@ -54,7 +57,9 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    const { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, processWeb, apiFilter, webFilter } = resolveScope(o);
+    const plugins = await loadPlugins();
+    const scope = resolveScope(o, plugins);
+    const { processEnv, processApi, processSns, processSqs, processWorkers, processWeb, apiFilter, webFilter, disabledPlugins } = scope;
     const dryRun = !!o.dryRun;
 
     // TODO: formalize the cicd initialization...
@@ -157,8 +162,8 @@ async function main(): Promise<void> {
     let snsResults: SNSResult | null = null;
     let sqsResults: SQSResult | null = null;
     let workerResults: WorkerResult | null = null;
-    let twilioResult: TwilioDeployResult | null = null;
     let webResults: WebResult | null = null;
+    let pluginResults: PluginResult[] = [];
 
     try {
         if( processEnv ) {
@@ -185,13 +190,14 @@ async function main(): Promise<void> {
             webResults = await cicd.processWeb(stage,appAlias,commit,webFilter,dryRun);
         }
 
-        if( processTwilio ) {
-            twilioResult = await cicd.processTwilio(stage,dryRun);
+        if (plugins.length > 0) {
+            const currentStageConfig = await cicd.getCurrentStageConfig();
+            pluginResults = await runPlugins('deploy', stage, currentStageConfig, dryRun, disabledPlugins);
         }
 
         // ── Print summary ─────────────────────────────────────────────
 
-        const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, twilio: twilioResult, web: webResults });
+        const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, web: webResults, pluginResults });
         console.log(`\nSummary: ${parts.join(', ')}`);
 
         // Verify deployment (skip in dry-run)
