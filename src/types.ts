@@ -278,6 +278,7 @@ export interface WebExportResult {
     fileCount: number;
     totalBytes: number;
     noindexInjected: boolean;
+    restored?: boolean;   // rollback: origin repointed to an existing artifact (no upload)
 }
 
 export interface WebResult {

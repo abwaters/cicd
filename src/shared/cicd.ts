@@ -951,6 +951,79 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
     return { exports };
 }
 
+// Web rollback restores a previously-deployed artifact rather than re-uploading
+// the current working tree. The target commit's objects already live at
+// s3://{bucket}/{stage}/{commit}/ from its original deploy, so rollback only
+// repoints the CloudFront origin to that prefix and invalidates — no upload.
+// Errors clearly if the prefix is gone (e.g. pruned by `clean`).
+async function processWebRollback(stage: string, commit: string, webFilter?: string, dryRun: boolean = false): Promise<WebResult | null> {
+    const all = await getExportsByType('web', webFilter);
+    if (all.length === 0) {
+        return null;
+    }
+    logger.verbose(`\nRolling back web deployments:`);
+
+    const exports: WebExportResult[] = [];
+    for (const cfg of all) {
+        if (cfg.stages && !cfg.stages.includes(stage)) {
+            logger.verbose(`   - skipping web '${cfg.name}' in '${stage}' (not in stages list)`);
+            continue;
+        }
+
+        const bucket = cfg.value!;
+        const distribution = cfg.distributionValue!;
+        const keyPrefix = `${stage}/${commit}`;
+        const originPath = `/${stage}/${commit}`;
+
+        // The artifact must already exist in S3 — rollback restores it, never uploads.
+        const keys = await s3.listObjectsByPrefix(bucket, `${keyPrefix}/`);
+        if (keys.length === 0) {
+            throw new Error(
+                `Cannot roll back web '${cfg.name}' to '${commit}': no objects at s3://${bucket}/${keyPrefix}/ ` +
+                `(the artifact may have been pruned by 'clean'). Re-deploy that commit instead.`
+            );
+        }
+
+        logger.verbose(` * Web '${cfg.name}' → restore s3://${bucket}/${keyPrefix}/  (distribution ${distribution})`);
+
+        if (dryRun) {
+            logger.verbose(`   - WOULD set CloudFront origin '${stage}' OriginPath to '${originPath}' (${keys.length} existing objects)`);
+            logger.verbose(`   - WOULD invalidate /* on distribution '${distribution}'`);
+            exports.push({
+                name: cfg.name,
+                bucket,
+                distribution,
+                originPath,
+                fileCount: keys.length,
+                totalBytes: 0,
+                noindexInjected: false,
+                restored: true
+            });
+            continue;
+        }
+
+        await cloudfront.updateOriginPath(distribution, stage, originPath);
+        logger.verbose(`   - CloudFront origin '${stage}' OriginPath = '${originPath}'`);
+
+        const invalidationId = await cloudfront.createInvalidation(distribution, ['/*']);
+        logger.verbose(`   - invalidation '${invalidationId}' created`);
+
+        exports.push({
+            name: cfg.name,
+            bucket,
+            distribution,
+            originPath,
+            invalidationId,
+            fileCount: keys.length,
+            totalBytes: 0,
+            noindexInjected: false,
+            restored: true
+        });
+    }
+
+    return { exports };
+}
+
 async function processWorkers(stage: string, commit: string, dryRun: boolean = false): Promise<WorkerResult | null> {
     const workers = await getWorkers();
     if (workers.length === 0) {
@@ -1329,6 +1402,7 @@ export {
     processSNS,
     processSQS,
     processWeb,
+    processWebRollback,
     processWorkers,
     processFargateDeploy,
     processFargateRestart,

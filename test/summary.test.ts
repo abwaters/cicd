@@ -159,4 +159,15 @@ describe('printDeploymentSummary', () => {
         });
         expect(parts).toEqual(['1 web export(s) deployed (115 files)']);
     });
+
+    it('web rollback reports "restored" not "deployed"', () => {
+        const parts = printDeploymentSummary({
+            web: {
+                exports: [
+                    { name: 'site', bucket: 'b', distribution: 'd', originPath: '/staging/abc', fileCount: 115, totalBytes: 0, noindexInjected: false, invalidationId: 'I1', restored: true },
+                ],
+            },
+        });
+        expect(parts).toEqual(['1 web export(s) restored (115 files)']);
+    });
 });
