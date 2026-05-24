@@ -97,11 +97,23 @@ describe('printDeploymentSummary', () => {
         expect(parts).toEqual(['2 web export(s) deployed (15 files)']);
     });
 
-    it('summarizes twilio webhook update', () => {
+    it('summarizes plugin results (lines and parts)', () => {
         const parts = printDeploymentSummary({
-            twilio: { messagingSid: 'MGabc', webhookUrl: 'https://x', action: 'updated' },
+            pluginResults: [
+                { summaryLines: ['\nTwilio:', '  MGabc  https://x'], summaryParts: ['Twilio webhook updated'] },
+            ],
         });
         expect(parts).toEqual(['Twilio webhook updated']);
+    });
+
+    it('aggregates summaryParts from multiple plugins', () => {
+        const parts = printDeploymentSummary({
+            pluginResults: [
+                { summaryLines: [], summaryParts: ['Twilio webhook updated'] },
+                { summaryLines: [], summaryParts: ['Slack notified'] },
+            ],
+        });
+        expect(parts).toEqual(['Twilio webhook updated', 'Slack notified']);
     });
 
     it('combines parts from multiple sections in order', () => {

@@ -19,7 +19,6 @@ import {
     SQSResult,
     WorkerFunctionResult,
     WorkerResult,
-    TwilioDeployResult,
     WebExportResult,
     WebResult,
     VersionInfo,
@@ -31,7 +30,6 @@ import { ContainerDefinition } from '@aws-sdk/client-ecs';
 import * as lambda from './lambda';
 import * as apigw from './apigw';
 import * as sns from './sns';
-import * as twilio from './twilio';
 import * as ecs from './ecs';
 import * as cf from './cloudformation';
 import * as s3 from './s3';
@@ -966,85 +964,6 @@ async function processWorkers(stage: string, commit: string, dryRun: boolean = f
     return { functions: results };
 }
 
-async function processTwilio(stage: string, dryRun: boolean = false): Promise<TwilioDeployResult | null> {
-    if (!stageConfig || !stageConfig.twilio) {
-        return null;
-    }
-
-    const twilioConfig = stageConfig.twilio;
-
-    // Read Twilio credentials from process environment (independent of Lambda env vars)
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!accountSid || !authToken) {
-        logger.verbose(`   - Twilio credentials not found in environment, skipping`);
-        return null;
-    }
-
-    // Look up the API export to get its path
-    const apiExport = exportMap.get(twilioConfig.smsWebhookApi);
-    if (!apiExport) {
-        logger.verbose(`   - Twilio smsWebhookApi '${twilioConfig.smsWebhookApi}' not found in exports, skipping`);
-        return null;
-    }
-
-    // Build webhook URL: https://{domain}/{mapping.path}/{api.prefix}/{api.path}
-    const mappingPath = composeMappingPath(stageConfig, apiExport);
-    const webhookUrl = 'https://' + stageConfig.mapping.domain + (mappingPath ? '/' + mappingPath : '');
-
-    let sid = twilioConfig.messagingSid;
-    if (sid.startsWith('!')) {
-        sid = await resolveVariable(sid);
-        if (!sid) {
-            logger.verbose(`   - Could not resolve Twilio messagingSid, skipping`);
-            return null;
-        }
-    }
-    const isMessagingService = twilio.isMessagingServiceSid(sid);
-
-    if (dryRun) {
-        const type = isMessagingService ? 'messaging service' : 'phone number';
-        logger.verbose(`   - WOULD update Twilio ${type} ${sid} webhook to ${webhookUrl}`);
-        return { messagingSid: sid, webhookUrl, action: 'updated' as const };
-    }
-
-    if (isMessagingService) {
-        logger.verbose(`\n * Updating Twilio messaging service webhook:`);
-        logger.verbose(`   - messaging service SID: ${sid}`);
-        logger.verbose(`   - webhook URL: ${webhookUrl}`);
-
-        const result = await twilio.updateMessagingServiceWebhook(
-            accountSid, authToken, sid, webhookUrl
-        );
-
-        logger.verbose(`   - updated ${result.friendlyName} → ${result.inboundRequestUrl}`);
-
-        return {
-            messagingSid: sid,
-            friendlyName: result.friendlyName,
-            webhookUrl: result.inboundRequestUrl,
-            action: 'updated' as const
-        };
-    } else {
-        logger.verbose(`\n * Updating Twilio phone number webhook:`);
-        logger.verbose(`   - phone number SID: ${sid}`);
-        logger.verbose(`   - webhook URL: ${webhookUrl}`);
-
-        const result = await twilio.updatePhoneNumberWebhook(
-            accountSid, authToken, sid, webhookUrl
-        );
-
-        logger.verbose(`   - updated ${result.phoneNumber} → ${result.smsUrl}`);
-
-        return {
-            messagingSid: sid,
-            phoneNumber: result.phoneNumber,
-            webhookUrl: result.smsUrl,
-            action: 'updated' as const
-        };
-    }
-}
-
 async function resolveFargateConfig(): Promise<{ cluster: string; ecrRepository: string; containerName: string; httpApi?: string }> {
     const fargate: FargateConfig | undefined = await getConfig('fargate');
     if (!fargate) {
@@ -1339,8 +1258,16 @@ async function validateRollbackTarget(appAlias: string, stage?: string, commit?:
     return { valid: warnings.length === 0, warnings };
 }
 
+async function getCurrentStageConfig(): Promise<StageConfig> {
+    if (!stageConfig) {
+        throw new Error('stageConfig not set — call setStageConfig() first');
+    }
+    return stageConfig;
+}
+
 export {
     getLambdaExports,
+    getExportByName,
     getExportsByType,
     getWorkers,
     getConfig,
@@ -1359,10 +1286,10 @@ export {
     processSQS,
     processWeb,
     processWorkers,
-    processTwilio,
     processFargateDeploy,
     processFargateRestart,
     resolveFargateConfig,
     resolveVariable,
-    setStageConfig
+    setStageConfig,
+    getCurrentStageConfig
 };

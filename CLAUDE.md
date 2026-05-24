@@ -122,9 +122,18 @@ All AWS SDK calls go through wrapper modules in `src/shared/`:
 - `ps.ts` - Get Parameter Store values
 - `sts.js` - Get caller identity
 - `github.js` - GitHub Deployments API (create, update status, list deployments)
-- `twilio.js` - Twilio messaging service and webhook management
 
 Each wrapper uses AWS SDK v3 with modular imports (`@aws-sdk/client-*`).
+
+### Plugin System
+
+Non-AWS-native integrations (e.g., Twilio) live in separate npm packages and are loaded at runtime via the `plugins` array in `cicd.json`. See `src/shared/plugin.ts` for the `CICDPlugin` interface, `src/shared/plugins.ts` for the loader, and `src/shared/plugin-runner.ts` for dispatch. A plugin contributes:
+- A JSON Schema fragment that merges into `stages[].<configKey>` at validate time
+- A `deploy`/`rollback` handler invoked by deploy.ts / rollback.ts
+- An `info` handler invoked by info.ts in verbose mode
+- An optional `scopeFlag` (default `no<Name>`) to skip the plugin for a single invocation
+
+The Twilio integration is the reference plugin and lives in its own repo at [`abwaters/cicd-plugin-twilio`](https://github.com/abwaters/cicd-plugin-twilio), published to GitHub Packages as `@abwaters/cicd-plugin-twilio`.
 
 ### Rate Limiting
 
@@ -135,7 +144,7 @@ Each wrapper uses AWS SDK v3 with modular imports (`@aws-sdk/client-*`).
 ### Entry Points
 
 The main entry point is **`index.ts`**, which routes to five subcommands:
-1. **`deploy.ts`**: Parses CLI args, calls `cicd.processFunctionEnvironmentVars()`, `cicd.processApiGateway()`, `cicd.processSNS()`, `cicd.processTwilio()`
+1. **`deploy.ts`**: Parses CLI args, calls `cicd.processFunctionEnvironmentVars()`, `cicd.processApiGateway()`, `cicd.processSNS()`, then dispatches to registered plugins via `runPlugins('deploy', ...)`
 2. **`rollback.ts`**: Fetches GitHub deployment history, prompts for confirmation, then reuses the same `cicd.*` functions as deploy to rollback to a prior commit
 3. **`info.ts`**: Lists stages, APIs, SNS topics; aggregates commit info from stage variables and subscriptions
 4. **`clean.ts`**: Identifies active commits, deletes unused deployments/aliases/versions
