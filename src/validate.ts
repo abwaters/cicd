@@ -69,8 +69,13 @@ async function main(): Promise<void> {
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
     logger.verbose('Loaded schema from:', schemaPath);
 
-    // Load config
-    const configPath = path.join(__dirname, '..', 'cicd.json');
+    // Load config from the user's cwd, not cicd's install dir (so this works
+    // when cicd is installed globally and run from a project directory).
+    const configPath = path.join(process.cwd(), 'cicd.json');
+    if (!fs.existsSync(configPath)) {
+        console.error(`✗ cicd.json not found in ${process.cwd()}`);
+        process.exit(1);
+    }
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     logger.verbose('Loaded config from:', configPath);
 
