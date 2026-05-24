@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     }
     const keep = await cicd.buildKeepSet(keepN);
 
-    console.time("api cicd");
+    console.time("cicd");
     if (!o.noHeader) printHeader();
 
     const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
         const verb = dryRun ? 'would' : '';
         console.log(`\nSummary${dryRunLabel}: ${verb ? verb + ' deregister' : 'Deregistered'} ${totalDeregistered} task definition revisions, ${verb ? verb + ' delete' : 'deleted'} ${totalEcrDeleted} ECR images`);
         console.log();
-        console.timeEnd("api cicd");
+        console.timeEnd("cicd");
         return;
     }
 
@@ -545,7 +545,7 @@ async function main(): Promise<void> {
     const verb = dryRun ? 'Would remove' : 'Removed';
     console.log(`\nSummary${dryRunLabel}: ${verb} ${deletedDeployments} deployments, ${deletedAliases} aliases, ${deletedVersions} versions`);
     console.log();
-    console.timeEnd("api cicd");
+    console.timeEnd("cicd");
 }
 
 main().catch(err => {

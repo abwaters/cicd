@@ -180,7 +180,7 @@ async function main(): Promise<void> {
         }
     }
 
-    console.time("rollback");
+    console.time("cicd");
     const exportsList = (await cicd.getConfig('exports')) || [];
     const workersList = (await cicd.getConfig('workers')) || [];
     const targetLabel = deployTargetLabel(scope, {
@@ -243,7 +243,7 @@ async function main(): Promise<void> {
         }
 
         console.log();
-        console.timeEnd("rollback");
+        console.timeEnd("cicd");
         return;
     }
 
@@ -310,7 +310,7 @@ async function main(): Promise<void> {
     }
 
     console.log();
-    console.timeEnd("rollback");
+    console.timeEnd("cicd");
 }
 
 main().catch(err => {

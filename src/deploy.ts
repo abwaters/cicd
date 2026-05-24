@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     const appAlias = `${app}-${commit}`;
     await cicd.setStageConfig(stage);
 
-    console.time("api cicd");
+    console.time("cicd");
     if (!o.noHeader) printHeader();
 
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
         }
 
         console.log();
-        console.timeEnd("api cicd");
+        console.timeEnd("cicd");
         return;
     }
 
@@ -226,7 +226,7 @@ async function main(): Promise<void> {
     }
 
     console.log();
-    console.timeEnd("api cicd");
+    console.timeEnd("cicd");
 }
 
 main().catch(err => {

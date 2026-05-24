@@ -42,7 +42,7 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    console.time('invalidate');
+    console.time('cicd');
     console.log(`Creating invalidations on '${stage}' for paths: ${paths.join(', ')}`);
 
     for (const w of targets) {
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     }
 
     console.log();
-    console.timeEnd('invalidate');
+    console.timeEnd('cicd');
 }
 
 main().catch(err => {
