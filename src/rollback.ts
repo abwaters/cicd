@@ -24,6 +24,34 @@ function prompt(question: string): Promise<string> {
     });
 }
 
+// When no commit is given, let the user pick a target from the rollback window.
+// `current` (window[0]) is excluded since you can't roll back to what's live.
+// Non-interactive stdin (CI / piped) falls back to the most recent prior
+// deployment, preserving the previous no-arg behavior.
+async function selectRollbackTarget(stage: string, window: any[], current: any): Promise<any> {
+    const candidates = window.slice(1);
+    if (!process.stdin.isTTY) {
+        return candidates[0];
+    }
+    console.log(`Rollback targets for '${stage}'  (current: ${current.ref}, deployed ${current.createdAt}):\n`);
+    candidates.forEach((d: any, i: number) => {
+        const desc = d.description ? `  ${d.description}` : '';
+        console.log(`  ${i + 1}) ${d.ref}  ${d.createdAt}${desc}`);
+    });
+    console.log();
+    const sel = await prompt(`Select a deployment to roll back to [1-${candidates.length}] (default 1), or q to cancel: `);
+    if (sel === 'q' || sel === 'quit') {
+        console.log('Rollback aborted.');
+        process.exit(0);
+    }
+    const idx = sel === '' ? 0 : parseInt(sel, 10) - 1;
+    if (Number.isNaN(idx) || idx < 0 || idx >= candidates.length) {
+        console.error(`Invalid selection '${sel}'.`);
+        process.exit(1);
+    }
+    return candidates[idx];
+}
+
 async function main(): Promise<void> {
     await credentials.validateCredentials();
 
@@ -85,6 +113,8 @@ async function main(): Promise<void> {
     const current = window[0];
     let target: any;
 
+    if (!o.noHeader) printHeader();
+
     if (targetCommit) {
         if (!windowRefs.has(targetCommit)) {
             console.error(`Error: Commit '${targetCommit}' is outside the rollback window for stage '${stage}' (keep window = N=${keepN}).`);
@@ -100,7 +130,7 @@ async function main(): Promise<void> {
             process.exit(1);
         }
     } else {
-        target = window[1];
+        target = await selectRollbackTarget(stage, window, current);
     }
 
     // Determine scope
@@ -110,7 +140,6 @@ async function main(): Promise<void> {
     const dryRun = !!o.dryRun;
 
     // Display confirmation
-    if (!o.noHeader) printHeader();
     const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
     console.log(`Rollback Summary${dryRunLabel}:`);
     console.log(`  Stage:    ${stage}`);
