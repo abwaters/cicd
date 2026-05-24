@@ -37,6 +37,9 @@ node src/index.js info --details    # Include function versions
 
 # Clean up old deployments
 node src/index.js clean             # Remove unused API deployments, Lambda aliases/versions
+
+# Install plugins listed in cicd.json
+node src/index.js install           # npm install --save-dev for any plugins missing from node_modules
 ```
 
 ## Architecture

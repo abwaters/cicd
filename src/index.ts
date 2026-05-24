@@ -46,6 +46,9 @@ async function main(): Promise<void> {
             case 'invalidate':
                 require('./invalidate');
                 break;
+            case 'install':
+                require('./install');
+                break;
             default:
                 console.error(`Error: Unknown command '${command}'\n`);
                 showUsage();
@@ -86,6 +89,10 @@ Commands:
   invalidate <stage> [paths]  Create CloudFront invalidations for web exports on a stage
                               Options: --web-filter=<name>, --verbose
                               Default path: /*
+
+  install                     Install any plugins listed in cicd.json that are
+                              missing from node_modules (npm install --save-dev)
+                              Options: --verbose
 
   validate                    Validate cicd.json against schema
                               Options: --verbose
