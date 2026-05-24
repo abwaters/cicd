@@ -59,4 +59,7 @@ async function main(): Promise<void> {
     console.timeEnd("restart");
 }
 
-main();
+main().catch(err => {
+    console.error(`\nRestart failed: ${err.message || err}`);
+    process.exit(1);
+});

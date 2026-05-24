@@ -452,4 +452,7 @@ async function main(): Promise<void> {
     console.timeEnd("api cicd");
 }
 
-main();
+main().catch(err => {
+    console.error(`\nError: ${err.message || err}`);
+    process.exit(1);
+});

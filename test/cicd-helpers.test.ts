@@ -1,4 +1,4 @@
-import { commitFromAlias, unionKeep, composeMappingPath, decideMappingAction } from '../src/shared/cicd';
+import { commitFromAlias, unionKeep, composeMappingPath, decideMappingAction, resolveVariable } from '../src/shared/cicd';
 import { StageConfig, ExportConfig } from '../src/types';
 
 describe('commitFromAlias', () => {
@@ -165,5 +165,33 @@ describe('decideMappingAction', () => {
     it('returns create when mapping list is empty', () => {
         expect(decideMappingAction([], 'my-api', 'tools', 'tools/hours'))
             .toEqual({ action: 'create' });
+    });
+});
+
+describe('resolveVariable - !SetEnv', () => {
+    const SAVED = process.env.RESOLVE_TEST_VAR;
+    afterEach(() => {
+        if (SAVED === undefined) delete process.env.RESOLVE_TEST_VAR;
+        else process.env.RESOLVE_TEST_VAR = SAVED;
+    });
+
+    it('returns the env value when set', async () => {
+        process.env.RESOLVE_TEST_VAR = 'hello';
+        await expect(resolveVariable('!SetEnv RESOLVE_TEST_VAR')).resolves.toBe('hello');
+    });
+
+    it('throws a clear error when env var is undefined', async () => {
+        delete process.env.RESOLVE_TEST_VAR;
+        await expect(resolveVariable('!SetEnv RESOLVE_TEST_VAR'))
+            .rejects.toThrow(/RESOLVE_TEST_VAR.*not set/);
+    });
+
+    it('treats empty string as a valid value (does not throw)', async () => {
+        process.env.RESOLVE_TEST_VAR = '';
+        await expect(resolveVariable('!SetEnv RESOLVE_TEST_VAR')).resolves.toBe('');
+    });
+
+    it('returns the input unchanged when no !prefix', async () => {
+        await expect(resolveVariable('literal-value')).resolves.toBe('literal-value');
     });
 });

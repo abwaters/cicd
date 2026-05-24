@@ -102,49 +102,48 @@ async function getVars(vars: string | string[] | undefined): Promise<Record<stri
 }
 
 async function resolveVariable(key: string): Promise<string> {
-    let val = '';
-    if( key.startsWith('!ImportValue ') ) {
+    if (key.startsWith('!ImportValue ')) {
         const importName = key.substring(13).trim();
-        if( rawExports.has(importName) ) {
-            val = rawExports.get(importName)!;
-        }else{
-            val = '';
+        if (!rawExports.has(importName)) {
+            throw new Error(`CloudFormation export '${importName}' not found (referenced by !ImportValue)`);
         }
-    }else if( key.startsWith('!SetEnv ') ) {
-        const envName = key.substring(8).trim();
-        val = process.env[envName] || '';
-        if (val) {
-            val = val.replace(/\\"/g, '"');
-            val = val.replace(/\\\\n/g, "\\n");
-        }
-    }else if( key.startsWith('!ParameterStore ') ) {
-        const psName = key.substring(16).trim();
-        if( psCache.has(psName) ) {
-            val = psCache.get(psName)!;
-        } else {
-            val = await ps.getParameterValue(psName, true) ?? '';
-            if (val) {
-                val = val.replace(/\\"/g, '"');
-                val = val.replace(/\\\\n/g, "\\n");
-            } else {
-                val = '';
-            }
-            psCache.set(psName, val);
-        }
-    } else {
-        val = key;
+        return rawExports.get(importName)!;
     }
-    return val;
+    if (key.startsWith('!SetEnv ')) {
+        const envName = key.substring(8).trim();
+        const raw = process.env[envName];
+        if (raw === undefined) {
+            throw new Error(`Environment variable '${envName}' is not set in the current shell (referenced by !SetEnv)`);
+        }
+        return raw.replace(/\\"/g, '"').replace(/\\\\n/g, "\\n");
+    }
+    if (key.startsWith('!ParameterStore ')) {
+        const psName = key.substring(16).trim();
+        if (psCache.has(psName)) {
+            return psCache.get(psName)!;
+        }
+        const fetched = await ps.getParameterValue(psName, true);
+        if (fetched === null) {
+            throw new Error(`Parameter Store value '${psName}' not found in this account/region (referenced by !ParameterStore)`);
+        }
+        const cleaned = fetched.replace(/\\"/g, '"').replace(/\\\\n/g, "\\n");
+        psCache.set(psName, cleaned);
+        return cleaned;
+    }
+    return key;
 }
 
-async function initEnvironmentVars(env: Record<string, string> | undefined): Promise<void> {
+async function initEnvironmentVars(env: Record<string, string> | undefined, errors: string[], scope: string): Promise<void> {
     if (!env) {
         return;
     }
-    const envConfig = Object.keys(env) ;
-    for(const key of envConfig) {
-        let val = await resolveVariable(env[key]);
-        envCache!.set(key,val);
+    for (const key of Object.keys(env)) {
+        try {
+            const val = await resolveVariable(env[key]);
+            envCache!.set(key, val);
+        } catch (e: any) {
+            errors.push(`  ${scope}.${key} = '${env[key]}'\n      ${e.message || e}`);
+        }
     }
 }
 
@@ -154,15 +153,22 @@ async function setStageConfig(stage: string): Promise<void> {
 
 async function initEnvironment(): Promise<void> {
     envCache = new Map();
+    const errors: string[] = [];
 
     // process primary variables
     const processVars = await getConfig("environment");
-    await initEnvironmentVars(processVars);
+    await initEnvironmentVars(processVars, errors, 'environment');
 
     // process stage env vars
-    if( stageConfig ) {
+    if (stageConfig) {
         const stageVars = stageConfig.environment;
-        await initEnvironmentVars(stageVars);
+        await initEnvironmentVars(stageVars, errors, `stages[${stageConfig.stage}].environment`);
+    }
+
+    if (errors.length) {
+        throw new Error(
+            `Failed to resolve ${errors.length} environment variable${errors.length === 1 ? '' : 's'}:\n${errors.join('\n')}`
+        );
     }
 }
 
@@ -1265,6 +1271,43 @@ async function getCurrentStageConfig(): Promise<StageConfig> {
     return stageConfig;
 }
 
+// Resolve every variable reference (global + each stage) and return a list of
+// failures rather than throwing on the first one. Requires AWS credentials so
+// CloudFormation exports and Parameter Store lookups can succeed.
+async function validateAllVariables(): Promise<string[]> {
+    const errors: string[] = [];
+
+    try {
+        if (!exportsInitialized) {
+            await initExports();
+            exportsInitialized = true;
+        }
+    } catch (e: any) {
+        errors.push(e.message || String(e));
+    }
+
+    async function checkScope(env: Record<string, string> | undefined, scope: string): Promise<void> {
+        if (!env) return;
+        for (const key of Object.keys(env)) {
+            try {
+                await resolveVariable(env[key]);
+            } catch (e: any) {
+                errors.push(`${scope}.${key} = '${env[key]}'\n    ${e.message || e}`);
+            }
+        }
+    }
+
+    const globalEnv: Record<string, string> | undefined = await getConfig('environment');
+    await checkScope(globalEnv, 'environment');
+
+    const stages: StageConfig[] = (await getConfig('stages')) || [];
+    for (const s of stages) {
+        await checkScope(s.environment, `stages[${s.stage}].environment`);
+    }
+
+    return errors;
+}
+
 export {
     getLambdaExports,
     getExportByName,
@@ -1291,5 +1334,6 @@ export {
     resolveFargateConfig,
     resolveVariable,
     setStageConfig,
-    getCurrentStageConfig
+    getCurrentStageConfig,
+    validateAllVariables
 };
