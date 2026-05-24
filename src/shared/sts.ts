@@ -1,12 +1,12 @@
 import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: STSClient | null = null;
 
 async function getClient(): Promise<STSClient> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new STSClient({ region });
     }
     return client;

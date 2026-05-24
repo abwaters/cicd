@@ -1,6 +1,6 @@
 import { SSMClient, GetParameterCommand, GetParametersByPathCommand } from "@aws-sdk/client-ssm";
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: SSMClient | null = null;
@@ -8,7 +8,7 @@ const psValues = new Map<string, string>();
 
 async function getClient(): Promise<SSMClient> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new SSMClient({ region });
     }
     return client;

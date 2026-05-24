@@ -1,10 +1,10 @@
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 
 async function validateCredentials(): Promise<boolean> {
     try {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         const client = new STSClient({ region });
 
         // Attempt to get caller identity - this will fail if credentials aren't configured

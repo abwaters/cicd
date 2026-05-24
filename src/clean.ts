@@ -8,6 +8,7 @@ import * as ecr from './shared/ecr';
 import * as s3 from './shared/s3';
 import * as cloudfront from './shared/cloudfront';
 import * as cicd from './shared/cicd';
+import * as awsContext from './shared/aws-context';
 import * as credentials from './shared/credentials';
 import * as options from './shared/options';
 import * as logger from './shared/logger';
@@ -27,8 +28,8 @@ async function main(): Promise<void> {
         logger.log('Verbose mode enabled');
     }
 
-    const account = await cicd.getConfig("account");
-    const region = await cicd.getConfig("region");
+    const account = await awsContext.getAccount();
+    const region = await awsContext.getRegion();
     const app: string = await cicd.getConfig("app");
     const dryRun = !!o.dryRun;
 
