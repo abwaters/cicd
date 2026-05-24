@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
-import { resolveScope } from './shared/scope';
+import { resolveScope, deployTargetLabel } from './shared/scope';
 import { loadPlugins } from './shared/plugins';
 import { runPlugins } from './shared/plugin-runner';
 import { PluginResult } from './shared/plugin';
@@ -91,7 +91,14 @@ async function main(): Promise<void> {
     }
 
     const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
-    console.log(`Deploying commit '${commit}' to '${stage}' stage [${computeMode}]${dryRunLabel}...`);
+    const exportsList = (await cicd.getConfig('exports')) || [];
+    const workersList = (await cicd.getConfig('workers')) || [];
+    const targetLabel = deployTargetLabel(scope, {
+        computeMode,
+        exportTypes: exportsList.map(e => e.type),
+        hasWorkers: workersList.length > 0,
+    });
+    console.log(`Deploying commit '${commit}' to '${stage}' stage [${targetLabel}]${dryRunLabel}...`);
 
     // Create GitHub deployment if repo is configured (skip in dry-run)
     let ghDeployment: any = null;

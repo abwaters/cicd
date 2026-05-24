@@ -307,6 +307,57 @@ async function main(): Promise<void> {
         workerResults.push({ name: w.value!, commits });
     }
 
+    // Collect web export deployment state per stage from CloudFront origin
+    // paths. Gathered unconditionally (not just --verbose) so web-only stages
+    // are reflected in the Stages summary instead of showing "not deployed".
+    const app: string = await cicd.getConfig('app');
+    const webExportsInfo: Array<{ name: string; distribution: string; perStage: Map<string, string> }> = [];
+    const webExports: ExportConfig[] = await cicd.getExportsByType('web');
+    for (const w of webExports) {
+        const distribution = w.distributionValue!;
+        const perStage = new Map<string, string>();
+        for (const stage of stages) {
+            if (w.stages && !w.stages.includes(stage.stage)) continue;
+            let commit = 'not deployed';
+            try {
+                const originPath = await cloudfront.getOriginPath(distribution, stage.stage);
+                if (originPath) {
+                    const parts = originPath.split('/').filter(p => p);
+                    commit = (parts.length >= 2 && parts[0] === stage.stage) ? parts[1] : originPath;
+                }
+            } catch (e: any) {
+                commit = `error: ${e.message}`;
+            }
+            perStage.set(stage.stage, commit);
+        }
+        webExportsInfo.push({ name: w.name, distribution, perStage });
+    }
+
+    // Normalize a stored commit key to the bare commit. API stages store the
+    // `{app}-{commit}` stage variable; strip the app prefix (handles app names
+    // that themselves contain hyphens). Web commits are already bare.
+    function bareCommit(key: string): string {
+        if (app && key.startsWith(app + '-')) return key.slice(app.length + 1);
+        const i = key.indexOf('-');
+        return i >= 0 ? key.slice(i + 1) : key;
+    }
+
+    // Aggregate the deployed bare commit(s) per stage across every concern
+    // (API stages + web exports). Drives the Stages summary's deployed/not-deployed
+    // decision and the displayed commit list.
+    const commitsByStage = new Map<string, string[]>();
+    for (const stage of stages) {
+        const set = new Set<string>();
+        for (const key of Object.keys(stagesInfo[stage.stage].commits)) {
+            set.add(bareCommit(key));
+        }
+        for (const we of webExportsInfo) {
+            const c = we.perStage.get(stage.stage);
+            if (c && c !== 'not deployed' && !c.startsWith('error:')) set.add(c);
+        }
+        commitsByStage.set(stage.stage, [...set]);
+    }
+
     // ── Print summary ─────────────────────────────────────────────────
 
     const widest = (names: string[]) => Math.max(0, ...names.map(n => n.length));
@@ -315,8 +366,7 @@ async function main(): Promise<void> {
     if (o.verbose && mainTip) console.log(`\nMain: ${mainTip}`);
     console.log(`\nStages:`);
     for(const [stageKey,stageEntry] of Object.entries(stagesInfo) ) {
-        let commits = Object.keys(stageEntry.commits);
-        commits = commits.map(c=>c.split('-')[1]);
+        let commits = commitsByStage.get(stageKey) || [];
         if (o.verbose) {
             if( commits.length === 1 ) {
                 console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${driftLabel(stageKey, commits[0])}${branchAnnotation(commits[0])}`);
@@ -386,29 +436,14 @@ async function main(): Promise<void> {
             }
         }
 
-        // Web (S3 + CloudFront)
-        const webExports: ExportConfig[] = await cicd.getExportsByType('web');
-        if (webExports.length > 0) {
+        // Web (S3 + CloudFront) — reuse the state gathered above.
+        if (webExportsInfo.length > 0) {
             console.log(`\nWeb:`);
-            for (const w of webExports) {
-                const distribution = w.distributionValue!;
-                console.log(`  ${w.name}  (distribution ${distribution})`);
+            for (const we of webExportsInfo) {
+                console.log(`  ${we.name}  (distribution ${we.distribution})`);
                 for (const stage of stages) {
-                    if (w.stages && !w.stages.includes(stage.stage)) continue;
-                    let commit = 'not deployed';
-                    try {
-                        const originPath = await cloudfront.getOriginPath(distribution, stage.stage);
-                        if (originPath) {
-                            const parts = originPath.split('/').filter(p => p);
-                            if (parts.length >= 2 && parts[0] === stage.stage) {
-                                commit = parts[1];
-                            } else {
-                                commit = originPath;
-                            }
-                        }
-                    } catch (e: any) {
-                        commit = `error: ${e.message}`;
-                    }
+                    if (!we.perStage.has(stage.stage)) continue;
+                    const commit = we.perStage.get(stage.stage)!;
                     console.log(`    ${stage.stage.padEnd(15)} ${commit}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
                 }
             }
