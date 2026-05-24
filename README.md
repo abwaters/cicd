@@ -246,6 +246,19 @@ This command:
 - Removes Lambda aliases not associated with active commits
 - Removes Lambda versions not referenced by active aliases
 
+### Install
+
+Install any plugins listed in `cicd.json`'s `plugins[]` array that aren't already in `node_modules`. Runs `npm install --save-dev` so the plugins are tracked in your `package.json` and lockfile.
+
+```bash
+cicd install
+
+# Enable verbose logging
+cicd install --verbose
+```
+
+If you're using a private registry (e.g. GitHub Packages), make sure your `.npmrc` is set up before running this — `cicd install` just shells out to `npm install` and will fail with the same auth error you'd see otherwise.
+
 ### Validate
 
 Validate cicd.json configuration:

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- `cicd install` subcommand — installs any plugins listed in `cicd.json`'s `plugins[]` array that are missing from `node_modules` via `npm install --save-dev`. Plugin names are validated against npm's package-name character set before being passed to npm.
+
+### Changed
+- The "plugin failed to load" error message now suggests `cicd install` alongside the existing `npm install <name>` hint.
+
 ## [1.1.0] — 2026-05-24
 
 ### Added
