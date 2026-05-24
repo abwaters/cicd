@@ -103,7 +103,10 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         for (const r of web.exports) {
             const noindex = r.noindexInjected ? ' [noindex]' : '';
             const inv = r.invalidationId ? `inv ${r.invalidationId}` : '';
-            console.log(`  ${r.name.padEnd(30)} ${r.bucket.padEnd(30)} ${r.originPath.padEnd(20)} ${r.fileCount} files, ${r.totalBytes} bytes${noindex} ${inv}`);
+            const sizeLabel = r.restored
+                ? `${r.fileCount} files (restored)`
+                : `${r.fileCount} files, ${r.totalBytes} bytes`;
+            console.log(`  ${r.name.padEnd(30)} ${r.bucket.padEnd(30)} ${r.originPath.padEnd(20)} ${sizeLabel}${noindex} ${inv}`);
         }
     }
 
@@ -168,7 +171,8 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
     }
     if (web && web.exports.length > 0) {
         const totalFiles = web.exports.reduce((acc, r) => acc + r.fileCount, 0);
-        parts.push(`${web.exports.length} web export(s) deployed (${totalFiles} files)`);
+        const verb = web.exports.every(r => r.restored) ? 'restored' : 'deployed';
+        parts.push(`${web.exports.length} web export(s) ${verb} (${totalFiles} files)`);
     }
     if (pluginResults) {
         for (const r of pluginResults) {
