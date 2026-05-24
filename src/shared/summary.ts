@@ -116,13 +116,17 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         }
     }
 
-    // Build summary parts
+    // Build summary parts. Each section only emits when it has something
+    // non-zero to report — keeps the line clean for projects that don't use
+    // every concern (e.g., a web-only deploy shouldn't mention APIs/env).
     const parts: string[] = [];
     if (env) {
         const updated = env.filter(r => r.updated).length;
-        parts.push(`${updated} functions configured`);
+        if (updated > 0) {
+            parts.push(`${updated} functions configured`);
+        }
     }
-    if (api) {
+    if (api && api.apis.length > 0) {
         const created = api.functions.filter(r => r.action === 'created').length;
         const existing = api.functions.filter(r => r.action === 'exists').length;
         parts.push(`${api.apis.length} APIs deployed (${created} new, ${existing} existing)`);
