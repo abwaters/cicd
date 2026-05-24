@@ -5,7 +5,7 @@ import {
     ImageIdentifier
 } from "@aws-sdk/client-ecr";
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 import * as logger from './logger';
 
@@ -13,7 +13,7 @@ let client: ECRClient | null = null;
 
 async function getClient(): Promise<ECRClient> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new ECRClient({ region });
     }
     return client;

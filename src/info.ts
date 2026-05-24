@@ -16,6 +16,7 @@ import {
 
 import * as options from './shared/options';
 import * as cicd from './shared/cicd';
+import * as awsContext from './shared/aws-context';
 import * as lambda from './shared/lambda';
 import * as apigw from './shared/apigw';
 import * as sns from './shared/sns';
@@ -32,8 +33,8 @@ async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
 
-    const account = await cicd.getConfig("account");
-    const region = await cicd.getConfig("region");
+    const account = await awsContext.getAccount();
+    const region = await awsContext.getRegion();
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
     args = options.stripOptions(args);

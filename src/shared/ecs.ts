@@ -13,7 +13,7 @@ import {
     RegisterTaskDefinitionCommandInput
 } from "@aws-sdk/client-ecs";
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry, formatDuration } from './utils';
 import * as logger from './logger';
 
@@ -21,7 +21,7 @@ let client: ECSClient | null = null;
 
 async function getClient(): Promise<ECSClient> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new ECSClient({ region });
     }
     return client;

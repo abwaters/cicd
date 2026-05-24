@@ -24,6 +24,7 @@ import {
 import { ThrottleSettings, DeploymentInfo } from '../types';
 
 import * as config from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: APIGatewayClient | null = null;
@@ -31,7 +32,7 @@ let clientv2: ApiGatewayV2Client | null = null;
 
 async function getClient(): Promise<APIGatewayClient> {
     if (!client) {
-        const region = await config.getConfig('region');
+        const region = await awsContext.getRegion();
         client = new APIGatewayClient({ region });
     }
     return client;
@@ -39,7 +40,7 @@ async function getClient(): Promise<APIGatewayClient> {
 
 async function getClientV2(): Promise<ApiGatewayV2Client> {
     if (!clientv2) {
-        const region = await config.getConfig('region');
+        const region = await awsContext.getRegion();
         clientv2 = new ApiGatewayV2Client({ region });
     }
     return clientv2;
@@ -138,7 +139,7 @@ async function listStages(restApiId: string): Promise<Stage[]> {
 
 async function updateStage(restApiId: string, stageName: string, deploymentId: string, commit: string, throttleSettings: ThrottleSettings | null): Promise<void> {
     const app = await config.getConfig('app');
-    const region = await config.getConfig('region');
+    const region = await awsContext.getRegion();
     try {
         const patchOperations: PatchOperation[] = [
             {

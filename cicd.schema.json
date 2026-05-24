@@ -8,10 +8,10 @@
     "required": ["computeMode"]
   },
   "then": {
-    "required": ["app", "account", "region", "fargate", "stages"]
+    "required": ["app", "fargate", "stages"]
   },
   "else": {
-    "required": ["app", "account", "region", "exports", "stages"]
+    "required": ["app", "exports", "stages"]
   },
   "properties": {
     "app": {
@@ -21,12 +21,12 @@
     },
     "account": {
       "type": "string",
-      "description": "AWS account ID (12-digit number)",
+      "description": "AWS account ID (12-digit number). Optional — when set, acts as a safety pin that must match the credentials' actual account.",
       "pattern": "^[0-9]{12}$"
     },
     "region": {
       "type": "string",
-      "description": "AWS region for deployments",
+      "description": "AWS region for deployments. Optional — falls back to AWS_REGION, AWS_DEFAULT_REGION, then the active AWS profile.",
       "pattern": "^[a-z]{2}-[a-z]+-[0-9]{1}$"
     },
     "repo": {

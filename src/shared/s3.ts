@@ -7,14 +7,14 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: S3Client | null = null;
 
 async function getClient(): Promise<S3Client> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new S3Client({ region });
     }
     return client;

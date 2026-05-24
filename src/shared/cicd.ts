@@ -38,6 +38,7 @@ import * as ps from './ps';
 import * as path from 'path';
 import * as github from './github';
 import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import * as logger from './logger';
 
 const rawExports = new Map<string, string>();
@@ -587,8 +588,8 @@ async function processApiGatewayFunctions(stage: string, appAlias: string, commi
 }
 
 async function processApiGatewayApis(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIDeploymentResult[]> {
-    const account = await getConfig("account");
-    const region = await getConfig("region");
+    const account = await awsContext.getAccount();
+    const region = await awsContext.getRegion();
     const globalThrottle: ThrottleSettings | undefined = await getConfig("throttle");
     const localStageConfig = await getStageConfig(stage);
     const apis = await getExportsByType('api',apiFilter);
@@ -717,8 +718,8 @@ async function processSNSFunctions(stage: string, appAlias: string, commit: stri
 }
 
 async function processSNSSubscriptions(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SNSSubscriptionResult[]> {
-    const account = await getConfig("account");
-    const region = await getConfig("region");
+    const account = await awsContext.getAccount();
+    const region = await awsContext.getRegion();
     const topics = await getExportsByType('sns');
     const results: SNSSubscriptionResult[] = [];
     logger.verbose(`\n * Updating SNS subscriptions:`);
@@ -791,8 +792,8 @@ async function processSQSFunctions(stage: string, appAlias: string, commit: stri
 }
 
 async function processSQSEventSources(stage: string, appAlias: string, commit: string, dryRun: boolean = false): Promise<SQSEventSourceResult[]> {
-    const account = await getConfig("account");
-    const region = await getConfig("region");
+    const account = await awsContext.getAccount();
+    const region = await awsContext.getRegion();
     const queues = await getExportsByType('sqs');
     const results: SQSEventSourceResult[] = [];
     logger.verbose(`\n * Updating SQS event source mappings:`);
