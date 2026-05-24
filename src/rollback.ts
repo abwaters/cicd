@@ -1,6 +1,6 @@
 import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
-import { resolveScope, scopeLabel } from './shared/scope';
+import { resolveScope, scopeLabel, deployTargetLabel } from './shared/scope';
 import { loadPlugins } from './shared/plugins';
 import { runPlugins } from './shared/plugin-runner';
 import { PluginResult } from './shared/plugin';
@@ -152,7 +152,14 @@ async function main(): Promise<void> {
     }
 
     console.time("rollback");
-    console.log(`\nRolling back to commit '${commit}' on '${stage}' stage [${computeMode}]${dryRunLabel}...`);
+    const exportsList = (await cicd.getConfig('exports')) || [];
+    const workersList = (await cicd.getConfig('workers')) || [];
+    const targetLabel = deployTargetLabel(scope, {
+        computeMode,
+        exportTypes: exportsList.map(e => e.type),
+        hasWorkers: workersList.length > 0,
+    });
+    console.log(`\nRolling back to commit '${commit}' on '${stage}' stage [${targetLabel}]${dryRunLabel}...`);
 
     // Create GitHub deployment for the rollback (skip in dry-run)
     let ghDeployment: any = null;
