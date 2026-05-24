@@ -128,4 +128,35 @@ describe('printDeploymentSummary', () => {
             '1 web export(s) deployed (1 files)',
         ]);
     });
+
+    it('omits env part when no functions were updated', () => {
+        const parts = printDeploymentSummary({
+            env: [{ name: 'fn-a', updated: false, varCount: 0 }],
+        });
+        expect(parts).toEqual([]);
+    });
+
+    it('omits env part when env array is empty (e.g. web-only project)', () => {
+        const parts = printDeploymentSummary({ env: [] });
+        expect(parts).toEqual([]);
+    });
+
+    it('omits api part when no api exports are configured', () => {
+        const parts = printDeploymentSummary({
+            api: { functions: [], apis: [] },
+        });
+        expect(parts).toEqual([]);
+    });
+
+    it('web-only deploy reports only the web part', () => {
+        const parts = printDeploymentSummary({
+            env: [],
+            api: { functions: [], apis: [] },
+            sns: null,
+            sqs: null,
+            workers: null,
+            web: { exports: [{ name: 'site', bucket: 'b', distribution: 'd', originPath: '/staging/abc', fileCount: 115, totalBytes: 6630255, noindexInjected: true, invalidationId: 'I1' }] },
+        });
+        expect(parts).toEqual(['1 web export(s) deployed (115 files)']);
+    });
 });
