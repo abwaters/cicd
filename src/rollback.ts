@@ -277,4 +277,7 @@ async function main(): Promise<void> {
     console.timeEnd("rollback");
 }
 
-main();
+main().catch(err => {
+    console.error(`\nRollback failed: ${err.message || err}`);
+    process.exit(1);
+});

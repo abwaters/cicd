@@ -82,4 +82,7 @@ function escapeForPowershell(value: string): string {
     return value.replace(/"/g, '`"').replace(/\$/g, '`$');
 }
 
-main();
+main().catch(err => {
+    console.error(`\nError: ${err.message || err}`);
+    process.exit(1);
+});
