@@ -1,0 +1,35 @@
+{
+  "name": "@abwaters/cicd-plugin-twilio",
+  "version": "1.0.0",
+  "description": "Twilio webhook plugin for @abwaters/cicd — keeps phone-number/messaging-service SMS webhooks pointed at the deployed API stage",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abwaters/cicd.git",
+    "directory": "plugins/twilio"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "@abwaters/cicd": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@abwaters/cicd": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "twilio": "^6.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.0",
+    "typescript": "^6.0.3"
+  }
+}

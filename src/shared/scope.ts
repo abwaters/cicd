@@ -1,4 +1,5 @@
 import { CLIOptions } from '../types';
+import { CICDPlugin, pluginScopeFlag } from './plugin';
 
 export interface DeployScope {
     processEnv: boolean;
@@ -6,20 +7,22 @@ export interface DeployScope {
     processSns: boolean;
     processSqs: boolean;
     processWorkers: boolean;
-    processTwilio: boolean;
     processWeb: boolean;
     apiFilter: string;
     webFilter: string;
+    disabledPlugins: Set<string>;
+    enabledPluginNames: string[];
 }
 
-export function resolveScope(o: CLIOptions): DeployScope {
+export function resolveScope(o: CLIOptions, plugins: CICDPlugin[] = []): DeployScope {
     let processEnv = false;
     let processApi = true;
     let processSns = true;
     let processSqs = true;
     let processWorkers = true;
-    let processTwilio = true;
     let processWeb = true;
+
+    let pluginsAutoDisabled = false;
 
     if (o.env) {
         processEnv = true;
@@ -27,19 +30,26 @@ export function resolveScope(o: CLIOptions): DeployScope {
         processSns = false;
         processSqs = false;
         processWorkers = false;
-        processTwilio = false;
         processWeb = false;
+        pluginsAutoDisabled = true;
     } else if (o.api || o.sns || o.sqs || o.workers || o.web) {
         processApi = !!o.api;
         processSns = !!o.sns;
         processSqs = !!o.sqs;
         processWorkers = !!o.workers;
         processWeb = !!o.web;
-        processTwilio = false;
+        pluginsAutoDisabled = true;
     }
 
-    if (o.noTwilio) {
-        processTwilio = false;
+    const disabledPlugins = new Set<string>();
+    const enabledPluginNames: string[] = [];
+    for (const p of plugins) {
+        const flag = pluginScopeFlag(p);
+        if (pluginsAutoDisabled || o[flag]) {
+            disabledPlugins.add(p.name);
+        } else {
+            enabledPluginNames.push(p.name);
+        }
     }
 
     if (processApi || processSns || processSqs || processWorkers) {
@@ -56,12 +66,16 @@ export function resolveScope(o: CLIOptions): DeployScope {
         webFilter = o.webFilter as string;
     }
 
-    return { processEnv, processApi, processSns, processSqs, processWorkers, processTwilio, processWeb, apiFilter, webFilter };
+    return {
+        processEnv, processApi, processSns, processSqs, processWorkers, processWeb,
+        apiFilter, webFilter,
+        disabledPlugins, enabledPluginNames,
+    };
 }
 
 export function scopeLabel(scope: DeployScope): string {
     const parts: string[] = [];
-    if (scope.processEnv && !scope.processApi && !scope.processSns && !scope.processSqs && !scope.processWorkers && !scope.processWeb) {
+    if (scope.processEnv && !scope.processApi && !scope.processSns && !scope.processSqs && !scope.processWorkers && !scope.processWeb && scope.enabledPluginNames.length === 0) {
         parts.push('Environment only');
     } else {
         if (scope.processApi) parts.push(scope.apiFilter ? `API (${scope.apiFilter})` : 'API');
@@ -69,7 +83,9 @@ export function scopeLabel(scope: DeployScope): string {
         if (scope.processSqs) parts.push('SQS');
         if (scope.processWorkers) parts.push('Workers');
         if (scope.processWeb) parts.push(scope.webFilter ? `Web (${scope.webFilter})` : 'Web');
-        if (scope.processTwilio) parts.push('Twilio');
+        for (const name of scope.enabledPluginNames) {
+            parts.push(name.charAt(0).toUpperCase() + name.slice(1));
+        }
         if (parts.length === 0) parts.push('Environment only');
         else parts.unshift('Environment');
     }

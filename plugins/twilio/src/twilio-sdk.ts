@@ -1,8 +1,12 @@
-import { TwilioPhoneResult, TwilioPhoneInfo, TwilioMessagingResult, TwilioMessagingInfo } from '../types';
-
 import Twilio from 'twilio';
+import {
+    TwilioPhoneResult,
+    TwilioPhoneInfo,
+    TwilioMessagingResult,
+    TwilioMessagingInfo,
+} from './types';
 
-async function updatePhoneNumberWebhook(accountSid: string, authToken: string, phoneNumberSid: string, smsUrl: string): Promise<TwilioPhoneResult> {
+export async function updatePhoneNumberWebhook(accountSid: string, authToken: string, phoneNumberSid: string, smsUrl: string): Promise<TwilioPhoneResult> {
     const client = Twilio(accountSid, authToken);
     const result = await client.incomingPhoneNumbers(phoneNumberSid).update({
         smsUrl,
@@ -15,7 +19,7 @@ async function updatePhoneNumberWebhook(accountSid: string, authToken: string, p
     };
 }
 
-async function getPhoneNumber(accountSid: string, authToken: string, phoneNumberSid: string): Promise<TwilioPhoneInfo> {
+export async function getPhoneNumber(accountSid: string, authToken: string, phoneNumberSid: string): Promise<TwilioPhoneInfo> {
     const client = Twilio(accountSid, authToken);
     const result = await client.incomingPhoneNumbers(phoneNumberSid).fetch();
     return {
@@ -27,7 +31,7 @@ async function getPhoneNumber(accountSid: string, authToken: string, phoneNumber
     };
 }
 
-async function updateMessagingServiceWebhook(accountSid: string, authToken: string, messagingServiceSid: string, inboundRequestUrl: string): Promise<TwilioMessagingResult> {
+export async function updateMessagingServiceWebhook(accountSid: string, authToken: string, messagingServiceSid: string, inboundRequestUrl: string): Promise<TwilioMessagingResult> {
     const client = Twilio(accountSid, authToken);
     const result = await client.messaging.v1.services(messagingServiceSid).update({
         inboundRequestUrl,
@@ -40,7 +44,7 @@ async function updateMessagingServiceWebhook(accountSid: string, authToken: stri
     };
 }
 
-async function getMessagingService(accountSid: string, authToken: string, messagingServiceSid: string): Promise<TwilioMessagingInfo> {
+export async function getMessagingService(accountSid: string, authToken: string, messagingServiceSid: string): Promise<TwilioMessagingInfo> {
     const client = Twilio(accountSid, authToken);
     const result = await client.messaging.v1.services(messagingServiceSid).fetch();
     return {
@@ -51,8 +55,6 @@ async function getMessagingService(accountSid: string, authToken: string, messag
     };
 }
 
-function isMessagingServiceSid(sid: string): boolean {
+export function isMessagingServiceSid(sid: string): boolean {
     return !!sid && sid.startsWith('MG');
 }
-
-export { updatePhoneNumberWebhook, getPhoneNumber, updateMessagingServiceWebhook, getMessagingService, isMessagingServiceSid };

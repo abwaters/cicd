@@ -9,7 +9,6 @@ import {
     InfoTopicResult,
     InfoQueueResult,
     InfoWorkerResult,
-    InfoTwilioResult,
     InfoGitHubResult,
     GitHubDeployment,
     BranchStatus
@@ -20,13 +19,14 @@ import * as cicd from './shared/cicd';
 import * as lambda from './shared/lambda';
 import * as apigw from './shared/apigw';
 import * as sns from './shared/sns';
-import * as twilio from './shared/twilio';
 import * as credentials from './shared/credentials';
 import * as logger from './shared/logger';
 import * as github from './shared/github';
 import * as ecs from './shared/ecs';
 import * as cloudfront from './shared/cloudfront';
 import { printHeader } from './shared/header';
+import { loadPlugins } from './shared/plugins';
+import { runInfoPlugins } from './shared/plugin-runner';
 
 async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
@@ -413,47 +413,14 @@ async function main(): Promise<void> {
             }
         }
 
-        // Twilio Phone Numbers & Messaging Services
-        const twilioResults: InfoTwilioResult[] = [];
-        const accountSid = process.env.TWILIO_ACCOUNT_SID;
-        const authToken = process.env.TWILIO_AUTH_TOKEN;
-        if (accountSid && authToken) {
-            for (const stage of stages) {
-                if (stage.twilio) {
-                    let sid = stage.twilio.messagingSid;
-                    if (sid.startsWith('!')) {
-                        sid = await cicd.resolveVariable(sid);
-                        if (!sid) {
-                            logger.verbose(`   - Could not resolve Twilio messagingSid for stage ${stage.stage}, skipping`);
-                            continue;
-                        }
-                    }
-                    if (twilio.isMessagingServiceSid(sid)) {
-                        try {
-                            const svc = await twilio.getMessagingService(accountSid, authToken, sid);
-                            twilioResults.push({ stage: stage.stage, label: svc.friendlyName, webhookUrl: svc.inboundRequestUrl || 'not set', type: 'messaging-service' });
-                        } catch (e: any) {
-                            logger.verbose(`   - Error fetching messaging service ${sid}: ${e.message}`);
-                            twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'messaging-service' });
-                        }
-                    } else {
-                        try {
-                            const phone = await twilio.getPhoneNumber(accountSid, authToken, sid);
-                            twilioResults.push({ stage: stage.stage, label: phone.phoneNumber, webhookUrl: phone.smsUrl, type: 'phone-number' });
-                        } catch (e: any) {
-                            logger.verbose(`   - Error fetching phone number ${sid}: ${e.message}`);
-                            twilioResults.push({ stage: stage.stage, label: sid, webhookUrl: `error: ${e.message}`, type: 'phone-number' });
-                        }
-                    }
+        // Plugin info — each plugin owns its own rendering
+        const plugins = await loadPlugins();
+        if (plugins.length > 0) {
+            const pluginResults = await runInfoPlugins(stages);
+            for (const r of pluginResults) {
+                for (const line of r.summaryLines) {
+                    console.log(line);
                 }
-            }
-        }
-        if (twilioResults.length > 0) {
-            console.log(`\nTwilio:`);
-            const labelWidth = widest(twilioResults.map(r => r.label));
-            for (const r of twilioResults) {
-                const typeTag = r.type === 'messaging-service' ? '[svc] ' : '[num] ';
-                console.log(`  ${r.stage.padEnd(15)} ${typeTag}${r.label.padEnd(labelWidth)}  ${r.webhookUrl}`);
             }
         }
 

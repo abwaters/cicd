@@ -13,6 +13,7 @@ export interface CICDConfig {
     exports: ExportConfig[];
     workers?: WorkerFunctionConfig[];
     stages: StageConfig[];
+    plugins?: string[];
 }
 
 export interface FargateConfig {
@@ -83,7 +84,6 @@ export interface StageConfig {
     mapping: StageMapping;
     environment?: Record<string, string>;
     throttle?: ThrottleSettings;
-    twilio?: TwilioStageConfig;
     service?: string;
     taskFamily?: string;
     httpApi?: string;
@@ -94,11 +94,6 @@ export interface StageConfig {
 export interface StageMapping {
     domain: string;
     path: string;
-}
-
-export interface TwilioStageConfig {
-    messagingSid: string;
-    smsWebhookApi: string;
 }
 
 // ─── CLI Options ─────────────────────────────────────────────────────────────
@@ -114,7 +109,6 @@ export interface CLIOptions {
     web?: boolean;
     apiFilter?: string;
     webFilter?: string;
-    noTwilio?: boolean;
     dryRun?: boolean;
     details?: boolean;
     [key: string]: string | boolean | undefined;
@@ -290,43 +284,6 @@ export interface WebResult {
     exports: WebExportResult[];
 }
 
-// ─── Twilio Types ────────────────────────────────────────────────────────────
-
-export interface TwilioPhoneResult {
-    sid: string;
-    phoneNumber: string;
-    smsUrl: string;
-}
-
-export interface TwilioPhoneInfo {
-    sid: string;
-    phoneNumber: string;
-    friendlyName: string;
-    smsUrl: string;
-    smsMethod: string;
-}
-
-export interface TwilioMessagingResult {
-    sid: string;
-    friendlyName: string;
-    inboundRequestUrl: string;
-}
-
-export interface TwilioMessagingInfo {
-    sid: string;
-    friendlyName: string;
-    inboundRequestUrl: string;
-    inboundMethod: string;
-}
-
-export interface TwilioDeployResult {
-    messagingSid: string;
-    friendlyName?: string;
-    phoneNumber?: string;
-    webhookUrl: string;
-    action: 'updated';
-}
-
 // ─── GitHub Types ────────────────────────────────────────────────────────────
 
 export interface GitHubDeployment {
@@ -381,13 +338,6 @@ export interface InfoQueueResult {
 export interface InfoWorkerResult {
     name: string;
     commits: Record<string, string>; // stageOrLabel -> commit
-}
-
-export interface InfoTwilioResult {
-    stage: string;
-    label: string;
-    webhookUrl: string;
-    type: 'messaging-service' | 'phone-number';
 }
 
 export interface InfoGitHubResult {
@@ -454,3 +404,13 @@ export interface CleanEcrResult {
     failures: number;
     activeCount: number;
 }
+
+// ─── Plugin Types (re-exports for plugin authors) ────────────────────────────
+
+export type {
+    CICDPlugin,
+    PluginContext,
+    PluginInfoContext,
+    PluginResult,
+    PluginPhase,
+} from './shared/plugin';

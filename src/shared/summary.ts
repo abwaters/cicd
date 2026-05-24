@@ -1,4 +1,5 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, TwilioDeployResult, WebResult } from '../types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, WebResult } from '../types';
+import { PluginResult } from './plugin';
 
 export interface DeploymentResults {
     env?: EnvResult[] | null;
@@ -6,15 +7,15 @@ export interface DeploymentResults {
     sns?: SNSResult | null;
     sqs?: SQSResult | null;
     workers?: WorkerResult | null;
-    twilio?: TwilioDeployResult | null;
     web?: WebResult | null;
+    pluginResults?: PluginResult[];
 }
 
 /**
  * Prints detailed deployment/rollback results and returns a summary parts array.
  */
 export function printDeploymentSummary(results: DeploymentResults): string[] {
-    const { env, api, sns, sqs, workers, twilio, web } = results;
+    const { env, api, sns, sqs, workers, web, pluginResults } = results;
 
     // Environment Variables
     if (env && env.length > 0) {
@@ -106,11 +107,13 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         }
     }
 
-    // Twilio
-    if (twilio) {
-        console.log(`\nTwilio:`);
-        const twilioLabel = twilio.messagingSid;
-        console.log(`  ${twilioLabel.padEnd(40)} ${twilio.webhookUrl}`);
+    // Plugin results (each plugin owns its own rendering)
+    if (pluginResults && pluginResults.length > 0) {
+        for (const r of pluginResults) {
+            for (const line of r.summaryLines) {
+                console.log(line);
+            }
+        }
     }
 
     // Build summary parts
@@ -163,8 +166,10 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
         const totalFiles = web.exports.reduce((acc, r) => acc + r.fileCount, 0);
         parts.push(`${web.exports.length} web export(s) deployed (${totalFiles} files)`);
     }
-    if (twilio) {
-        parts.push(`Twilio webhook ${twilio.action}`);
+    if (pluginResults) {
+        for (const r of pluginResults) {
+            parts.push(...r.summaryParts);
+        }
     }
 
     return parts;
