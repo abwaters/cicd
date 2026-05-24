@@ -4,9 +4,14 @@ import { getConfig } from './config';
 let loaded: CICDPlugin[] | null = null;
 
 function resolvePlugin(name: string): CICDPlugin {
+    // Prefer the user's project (cwd) over cicd's own install location so a
+    // project-local `npm install --save-dev <plugin>` (what `cicd install` does)
+    // is picked up by `cicd deploy` even when cicd itself is installed globally.
+    const searchPaths = [process.cwd(), ...(require.resolve.paths(name) || [])];
     let mod: any;
     try {
-        mod = require(name);
+        const resolved = require.resolve(name, { paths: searchPaths });
+        mod = require(resolved);
     } catch (e: any) {
         throw new Error(
             `Failed to load plugin '${name}': ${e.message}\n` +
