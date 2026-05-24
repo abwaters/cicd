@@ -24,14 +24,14 @@ import {
 import * as crypto from 'crypto';
 import { VersionInfo, VersionListItem, AliasInfo, EventSourceMappingInfo, EventSourceMappingOptions } from '../types';
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: LambdaClient | null = null;
 
 async function getClient(): Promise<LambdaClient> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new LambdaClient({ region });
     }
     return client;

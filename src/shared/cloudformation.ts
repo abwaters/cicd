@@ -1,13 +1,13 @@
 import { ListExportsCommand, CloudFormationClient, Export } from "@aws-sdk/client-cloudformation";
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: CloudFormationClient | null = null;
 
 async function getClient(): Promise<CloudFormationClient> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new CloudFormationClient({ region });
     }
     return client;

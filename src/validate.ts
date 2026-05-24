@@ -5,6 +5,8 @@ import { CICDConfig } from './types';
 
 import * as options from './shared/options';
 import * as logger from './shared/logger';
+import * as cicd from './shared/cicd';
+import * as awsContext from './shared/aws-context';
 import { printHeader } from './shared/header';
 import { semanticValidation } from './shared/semantic';
 import { loadPluginsSync } from './shared/plugins';
@@ -131,6 +133,52 @@ async function main(): Promise<void> {
     if (semanticErrors.length > 0) {
       console.error('✗ cicd.json semantic validation failed:\n');
       for (const err of semanticErrors) {
+        console.error(`  ${err}`);
+      }
+      process.exit(1);
+    }
+
+    // Variable resolution — resolves every !ImportValue, !SetEnv, and
+    // !ParameterStore reference across global and per-stage environment.
+    // Requires AWS credentials. Skipped with --skip-aws (shape-only check).
+    if (o.skipAws) {
+      logger.verbose('Skipping variable resolution (--skip-aws)');
+      console.log('✓ cicd.json is valid (shape only — variable resolution skipped)');
+      return;
+    }
+
+    // Resolve region + account via the fallback chain. getAccount() also
+    // enforces the account-pin safety check (cicd.json "account" must match
+    // the credentials' actual account if pinned).
+    let region: string;
+    let account: string;
+    try {
+      region = await awsContext.getRegion();
+      account = await awsContext.getAccount();
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      if (/Could not load credentials|Unable to load credentials|CredentialsProviderError/i.test(msg)) {
+        console.error(`✗ Cannot validate variable references: AWS credentials are not configured.\n`);
+        console.error('  Set AWS_PROFILE, AWS_ACCESS_KEY_ID, or configure ~/.aws/credentials.');
+        console.error('  Or re-run with --skip-aws to validate shape only.');
+        process.exit(1);
+      }
+      if (/security token|not authorized|ExpiredToken|UnrecognizedClientException/i.test(msg)) {
+        const profile = process.env.AWS_PROFILE ? ` (AWS_PROFILE=${process.env.AWS_PROFILE})` : '';
+        console.error(`✗ Cannot validate variable references: AWS credentials are invalid or expired${profile}.`);
+        console.error('  Re-run with --skip-aws to validate shape only.');
+        process.exit(1);
+      }
+      // region-not-found, account-pin-mismatch, or any other resolution error
+      console.error(`✗ ${msg}`);
+      process.exit(1);
+    }
+    logger.verbose(`Resolved AWS context: account=${account}, region=${region}`);
+
+    const varErrors = await cicd.validateAllVariables();
+    if (varErrors.length > 0) {
+      console.error(`✗ cicd.json variable resolution failed (${varErrors.length} issue${varErrors.length === 1 ? '' : 's'}):\n`);
+      for (const err of varErrors) {
         console.error(`  ${err}`);
       }
       process.exit(1);

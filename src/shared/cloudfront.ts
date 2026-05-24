@@ -6,7 +6,7 @@ import {
     DistributionConfig
 } from "@aws-sdk/client-cloudfront";
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: CloudFrontClient | null = null;
@@ -14,7 +14,7 @@ let client: CloudFrontClient | null = null;
 async function getClient(): Promise<CloudFrontClient> {
     if (!client) {
         // CloudFront is a global service; SDK requires a region but ignores it for control-plane calls.
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new CloudFrontClient({ region });
     }
     return client;

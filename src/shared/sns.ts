@@ -1,14 +1,14 @@
 import { SNSClient, SubscribeCommand, ListSubscriptionsByTopicCommand, UnsubscribeCommand } from "@aws-sdk/client-sns";
 import { SubscriptionInfo } from '../types';
 
-import { getConfig } from './config';
+import * as awsContext from './aws-context';
 import { awsRetry } from './utils';
 
 let client: SNSClient | null = null;
 
 async function getClient(): Promise<SNSClient> {
     if (!client) {
-        const region = await getConfig('region');
+        const region = await awsContext.getRegion();
         client = new SNSClient({ region });
     }
     return client;

@@ -2,8 +2,8 @@
 
 export interface CICDConfig {
     app: string;
-    account: string;
-    region: string;
+    account?: string;
+    region?: string;
     repo?: string;
     computeMode?: 'lambda' | 'fargate';
     fargate?: FargateConfig;

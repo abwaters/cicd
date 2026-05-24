@@ -94,8 +94,10 @@ Commands:
                               missing from node_modules (npm install --save-dev)
                               Options: --verbose
 
-  validate                    Validate cicd.json against schema
-                              Options: --verbose
+  validate                    Validate cicd.json against schema, then resolve
+                              every !ImportValue / !SetEnv / !ParameterStore
+                              reference (requires AWS credentials)
+                              Options: --skip-aws, --verbose
 
 Global Options:
   --verbose                   Enable verbose logging for debugging
