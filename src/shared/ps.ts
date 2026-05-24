@@ -15,23 +15,28 @@ async function getClient(): Promise<SSMClient> {
 }
 
 async function getParameterValue(parameterName: string, withDecryption: boolean): Promise<string | null> {
-    try {
-        if( psValues.has(parameterName) ) {
-            return psValues.get(parameterName)!;
-        }
-        const command = new GetParameterCommand({
-            Name: parameterName,
-            WithDecryption: withDecryption,
-        });
+    if( psValues.has(parameterName) ) {
+        return psValues.get(parameterName)!;
+    }
+    const command = new GetParameterCommand({
+        Name: parameterName,
+        WithDecryption: withDecryption,
+    });
 
-        const ssmClient = await getClient();
+    const ssmClient = await getClient();
+    try {
         const response = await awsRetry(() => ssmClient.send(command));
         const value = response.Parameter?.Value || '';
         psValues.set(parameterName, value);
         return value;
-    } catch (error) {
-        console.error(`Error fetching parameter ${parameterName}:`, error);
-        return null;
+    } catch (error: any) {
+        // ParameterNotFound is a normal "missing" signal — return null so the
+        // caller can report it as an unresolved reference. Any other error
+        // (network, auth, throttling) is a real failure — rethrow.
+        if (error?.name === 'ParameterNotFound' || error?.__type === 'ParameterNotFound') {
+            return null;
+        }
+        throw new Error(`Parameter Store lookup failed for '${parameterName}': ${error?.message || error}`);
     }
 }
 
