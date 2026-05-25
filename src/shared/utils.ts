@@ -1,4 +1,21 @@
+import { execSync } from 'child_process';
+
 const SLEEP_TIME = 1000;
+
+// Resolve the subject line (first line) of a commit message so deployments can
+// default to a meaningful description. Returns null if git is unavailable or the
+// commit can't be resolved locally (callers fall back to a generated string).
+function getCommitSubject(commit: string): string | null {
+    try {
+        const subject = execSync(`git log -1 --format=%s ${commit}`, {
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        return subject || null;
+    } catch {
+        return null;
+    }
+}
 
 async function sleep(ms?: number): Promise<void> {
     if( !ms ) {
@@ -121,4 +138,4 @@ function formatDuration(totalSeconds: number): string {
     return `${seconds}s`;
 }
 
-export { sleep, awsRetry, isThrottleError, isNetworkError, describeNetworkError, formatDuration };
+export { sleep, awsRetry, isThrottleError, isNetworkError, describeNetworkError, formatDuration, getCommitSubject };
