@@ -106,7 +106,7 @@ export function printDeploymentSummary(results: DeploymentResults): string[] {
             const sizeLabel = r.restored
                 ? `${r.fileCount} files (restored)`
                 : `${r.fileCount} files, ${r.totalBytes} bytes`;
-            console.log(`  ${r.name.padEnd(30)} ${r.bucket.padEnd(30)} ${r.originPath.padEnd(20)} ${sizeLabel}${noindex} ${inv}`);
+            console.log(`  ${r.name.padEnd(30)} ${r.bucket.padEnd(30)} ${`${r.livePath} ← ${r.liveCommit}`.padEnd(28)} ${sizeLabel}${noindex} ${inv}`);
         }
     }
 

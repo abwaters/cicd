@@ -6,7 +6,6 @@ import * as apigw from './shared/apigw';
 import * as ecs from './shared/ecs';
 import * as ecr from './shared/ecr';
 import * as s3 from './shared/s3';
-import * as cloudfront from './shared/cloudfront';
 import * as cicd from './shared/cicd';
 import * as awsContext from './shared/aws-context';
 import * as credentials from './shared/credentials';
@@ -69,16 +68,16 @@ async function main(): Promise<void> {
             const distribution = w.distributionValue!;
             const applicableStages = allStages.filter(s => !w.stages || w.stages.includes(s.stage));
 
-            // Drift check: CF OriginPath should equal /{stage}/{recent[0]}
+            // Drift check: the live marker commit (what the last swap placed into
+            // {stage}/live/) should equal the most-recent kept commit from GitHub.
+            // A mismatch means the latest deployment never landed in live/ (e.g. a
+            // half-failed deploy) or the bucket was tampered with.
             for (const s of applicableStages) {
                 try {
-                    const originPath = await cloudfront.getOriginPath(distribution, s.stage);
+                    const marker = await s3.getJson<{ commit?: string }>(bucket, cicd.liveMarkerKey(s.stage));
                     const recent = [...(keep.get(s.stage) ?? new Set<string>())][0];
-                    if (originPath && recent) {
-                        const expected = `/${s.stage}/${recent}`;
-                        if (originPath !== expected) {
-                            console.log(`  WARN: ${w.name} stage '${s.stage}' OriginPath '${originPath}' != most-recent kept '${expected}' (drift)`);
-                        }
+                    if (marker?.commit && recent && marker.commit !== recent) {
+                        console.log(`  WARN: ${w.name} stage '${s.stage}' live marker '${marker.commit}' != most-recent kept '${recent}' (drift)`);
                     }
                 } catch (e: any) {
                     logger.verbose(`   - drift check failed for ${w.name}/${s.stage}: ${e.message}`);
@@ -96,6 +95,12 @@ async function main(): Promise<void> {
                     const trimmed = cp.replace(/\/$/, '');
                     const segments = trimmed.split('/');
                     const commit = segments[segments.length - 1];
+                    // The live serving prefix is not a commit folder — never prune it.
+                    if (commit === 'live') {
+                        logger.verbose(`   - keep s3://${bucket}/${cp} (live serving prefix — never pruned)`);
+                        kept++;
+                        continue;
+                    }
                     if (keepStage.has(commit)) {
                         kept++;
                         logger.verbose(`   - keep s3://${bucket}/${cp}`);

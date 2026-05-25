@@ -1,6 +1,8 @@
 import {
     S3Client,
     PutObjectCommand,
+    GetObjectCommand,
+    CopyObjectCommand,
     ListObjectsV2Command,
     DeleteObjectsCommand
 } from "@aws-sdk/client-s3";
@@ -190,12 +192,68 @@ async function deleteObjects(bucket: string, keys: string[]): Promise<number> {
     return deleted;
 }
 
+// Make destPrefix an exact mirror of srcPrefix with no window where it is empty
+// or partial: every source object is copied (overwriting) first, then any dest
+// object whose relative path is absent from the source is pruned. Server-side
+// copy with MetadataDirective defaulting to COPY preserves the source object's
+// ContentType and CacheControl (set by uploadDirectory). Returns the source
+// object count. Throws if the source prefix is empty (nothing to mirror).
+async function syncPrefix(bucket: string, srcPrefix: string, destPrefix: string): Promise<number> {
+    const src = srcPrefix.endsWith('/') ? srcPrefix : `${srcPrefix}/`;
+    const dest = destPrefix.endsWith('/') ? destPrefix : `${destPrefix}/`;
+
+    const srcKeys = await listObjectsByPrefix(bucket, src);
+    if (srcKeys.length === 0) {
+        throw new Error(`syncPrefix: source prefix 's3://${bucket}/${src}' is empty`);
+    }
+
+    const s3 = await getClient();
+    const newRel = new Set<string>();
+    for (const srcKey of srcKeys) {
+        const rel = srcKey.slice(src.length);
+        newRel.add(rel);
+        await awsRetry(() => s3.send(new CopyObjectCommand({
+            Bucket: bucket,
+            Key: `${dest}${rel}`,
+            CopySource: encodeURI(`${bucket}/${srcKey}`)
+        })));
+    }
+
+    const liveKeys = await listObjectsByPrefix(bucket, dest);
+    const stale = liveKeys.filter(k => !newRel.has(k.slice(dest.length)));
+    await deleteObjects(bucket, stale);
+
+    return srcKeys.length;
+}
+
+// Read an object body as UTF-8 text. Returns null when the object does not exist
+// (so callers treat a missing marker as "not deployed" rather than an error).
+async function getObjectText(bucket: string, key: string): Promise<string | null> {
+    const s3 = await getClient();
+    try {
+        const resp = await awsRetry(() => s3.send(new GetObjectCommand({ Bucket: bucket, Key: key })));
+        if (!resp.Body) return null;
+        return await (resp.Body as any).transformToString('utf-8');
+    } catch (e: any) {
+        if (e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404) return null;
+        throw e;
+    }
+}
+
+async function getJson<T>(bucket: string, key: string): Promise<T | null> {
+    const text = await getObjectText(bucket, key);
+    return text === null ? null : (JSON.parse(text) as T);
+}
+
 export {
     uploadDirectory,
     putObject,
     listObjectsByPrefix,
     listCommonPrefixes,
     deleteObjects,
+    syncPrefix,
+    getObjectText,
+    getJson,
     defaultContentType,
     defaultCacheControl
 };
