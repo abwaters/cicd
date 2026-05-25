@@ -257,7 +257,9 @@ async function main(): Promise<void> {
         // ── Print summary ─────────────────────────────────────────────
 
         const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, web: webResults, pluginResults });
-        console.log(`\nSummary: ${parts.join(', ')}`);
+        if (parts.length > 0) {
+            console.log(`\nSummary: ${parts.join(', ')}`);
+        }
 
         // Verify deployment (skip in dry-run)
         if (!dryRun) {

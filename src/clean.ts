@@ -263,7 +263,6 @@ async function main(): Promise<void> {
     }
 
     // ── Lambda clean flow (existing behavior) ───────────────────────
-    console.log(`Preparing clean api gateway deployments and lambda aliases/versions...`);
 
     // get list of exports from cloudformation
     const apis: ExportConfig[] = await cicd.getExportsByType('api');
@@ -274,6 +273,19 @@ async function main(): Promise<void> {
     const sqsFunctions: FunctionConfig[] = await cicd.getLambdaExports('sqs');
     const workers: WorkerFunctionConfig[] = await cicd.getWorkers();
     const functions = [...apiFunctions,...snsFunctions,...sqsFunctions];
+
+    // Only mention the resource categories this repo actually has. A web-only
+    // repo has none of these, so the lambda-flow header/summary stay silent.
+    const hasLambdaResources =
+        apis.length > 0 || topics.length > 0 || queues.length > 0 ||
+        functions.length > 0 || workers.length > 0;
+    const cleanTargets: string[] = [];
+    if (apis.length > 0) cleanTargets.push('API Gateway deployments');
+    if (functions.length > 0 || workers.length > 0) cleanTargets.push('Lambda aliases/versions');
+    if (cleanTargets.length > 0) {
+        console.log(`Preparing to clean ${cleanTargets.join(' and ')}...`);
+    }
+
     const stageList: StageConfig[] = await cicd.getConfig('stages');
     const stageNames = new Set(stageList.map(s => s.stage));
     const WORKER_VERSION_RETENTION = 5;
@@ -495,11 +507,13 @@ async function main(): Promise<void> {
     // ── Print summary ─────────────────────────────────────────────────
 
     // Active commits
-    console.log(`\nActive commits:`);
-    // Group by commit, show stages
-    for (const [commit, stages] of commitStages) {
-        const stageLabel = stages.length > 0 ? stages.join(', ') : 'sns';
-        console.log(`  ${stageLabel.padEnd(20)} : ${commit}`);
+    if (commitStages.size > 0) {
+        console.log(`\nActive commits:`);
+        // Group by commit, show stages
+        for (const [commit, stages] of commitStages) {
+            const stageLabel = stages.length > 0 ? stages.join(', ') : 'sns';
+            console.log(`  ${stageLabel.padEnd(20)} : ${commit}`);
+        }
     }
 
     // API Deployments
@@ -546,9 +560,12 @@ async function main(): Promise<void> {
         }
     }
 
-    // Final summary
-    const verb = dryRun ? 'Would remove' : 'Removed';
-    console.log(`\nSummary${dryRunLabel}: ${verb} ${deletedDeployments} deployments, ${deletedAliases} aliases, ${deletedVersions} versions`);
+    // Final summary — only when this repo actually has lambda-flow resources.
+    // (A web-only repo reports its cleanup via the per-stage `Web cleanup:` lines.)
+    if (hasLambdaResources) {
+        const verb = dryRun ? 'Would remove' : 'Removed';
+        console.log(`\nSummary${dryRunLabel}: ${verb} ${deletedDeployments} deployments, ${deletedAliases} aliases, ${deletedVersions} versions`);
+    }
     console.log();
     console.timeEnd("clean");
 }
