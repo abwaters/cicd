@@ -43,7 +43,13 @@ function truncateDescription(description: string): string {
     return description.slice(0, MAX - 1) + '…';
 }
 
-function createDeployment(repo: string, ref: string, environment: string, description: string): { id: number } | null {
+function createDeployment(
+    repo: string,
+    ref: string,
+    environment: string,
+    description: string,
+    opts: { productionEnvironment?: boolean; transientEnvironment?: boolean } = {}
+): { id: number } | null {
     if (!isGhAvailable()) {
         logger.verbose(`   - gh CLI not installed, skipping GitHub deployment tracking`);
         return null;
@@ -55,7 +61,9 @@ function createDeployment(repo: string, ref: string, environment: string, descri
             environment,
             description: truncateDescription(description),
             auto_merge: false,
-            required_contexts: []
+            required_contexts: [],
+            production_environment: !!opts.productionEnvironment,
+            transient_environment: !!opts.transientEnvironment
         });
         const cmd = `gh api -X POST /repos/${repo}/deployments -H "Accept: application/vnd.github+json" --input -`;
         logger.verbose(`   - gh api: POST /repos/${repo}/deployments`);

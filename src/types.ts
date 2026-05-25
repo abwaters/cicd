@@ -89,6 +89,7 @@ export interface StageConfig {
     httpApi?: string;
     cpu?: string;
     memory?: string;
+    production?: boolean;
 }
 
 export interface StageMapping {
@@ -111,6 +112,11 @@ export interface CLIOptions {
     webFilter?: string;
     dryRun?: boolean;
     details?: boolean;
+    force?: boolean;
+    keep?: string;
+    transient?: boolean;
+    noTransient?: boolean;
+    description?: string;
     [key: string]: string | boolean | undefined;
 }
 

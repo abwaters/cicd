@@ -12,8 +12,9 @@ import * as options from './shared/options';
 import * as credentials from './shared/credentials';
 import * as logger from './shared/logger';
 import * as github from './shared/github';
-import { isNetworkError, describeNetworkError } from './shared/utils';
+import { isNetworkError, describeNetworkError, getCommitSubject } from './shared/utils';
 import { printHeader } from './shared/header';
+import { prompt } from './shared/prompt';
 
 function getCurrentCommit(): string {
     try {
@@ -75,6 +76,15 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
     const repo = await cicd.getConfig("repo");
 
+    // Production stages (production: true in cicd.json) flag the GitHub deployment
+    // as a production_environment and require confirmation before deploying.
+    const stageConfig = await cicd.getCurrentStageConfig();
+    const production = !!stageConfig.production;
+
+    // Deployment description: explicit --description override, else the commit's
+    // subject line, else a generated fallback if git can't resolve the commit.
+    const description = o.description || getCommitSubject(commit) || `Deploy ${appAlias} to ${stage}`;
+
     // Idempotency guard: if the requested commit is already the current
     // successful deployment for this stage, treat it as a no-op success
     // rather than re-running the pipeline. Skipped on --dry-run, when
@@ -90,7 +100,37 @@ async function main(): Promise<void> {
         }
     }
 
+    // Production safety pin: confirm before touching a production stage. Bypassed
+    // by --force and skipped on dry runs. Non-interactive sessions (CI/piped) must
+    // pass --force rather than silently deploying to production.
+    if (production && !dryRun && !o.force) {
+        if (process.stdin.isTTY) {
+            const answer = await prompt(`Deploy to PRODUCTION stage '${stage}'? (y/N) `);
+            if (answer !== 'y' && answer !== 'yes') {
+                console.log('Deploy aborted.');
+                process.exit(0);
+            }
+        } else {
+            console.error(`Refusing to deploy to PRODUCTION stage '${stage}' without confirmation. Re-run with --force.`);
+            process.exit(1);
+        }
+    }
+
+    // Transient environment: feature/PR deploys (commit not on the default branch)
+    // are marked transient so GitHub auto-inactivates them in the Environments UI.
+    // Explicit --transient / --no-transient override the branch-based auto-detection.
+    let transient = false;
+    if (o.noTransient) {
+        transient = false;
+    } else if (o.transient) {
+        transient = true;
+    } else if (repo && github.isGhAvailable()) {
+        const status = github.getCommitBranchStatus(repo, commit, 'main');
+        transient = status ? !status.onMain : false;
+    }
+
     const dryRunLabel = dryRun ? ' [DRY RUN]' : '';
+    const flagMarkers = `${production ? ' [production]' : ''}${transient ? ' [transient]' : ''}`;
     const exportsList = (await cicd.getConfig('exports')) || [];
     const workersList = (await cicd.getConfig('workers')) || [];
     const targetLabel = deployTargetLabel(scope, {
@@ -98,12 +138,15 @@ async function main(): Promise<void> {
         exportTypes: exportsList.map(e => e.type),
         hasWorkers: workersList.length > 0,
     });
-    console.log(`Deploying commit '${commit}' to '${stage}' stage [${targetLabel}]${dryRunLabel}...`);
+    console.log(`Deploying commit '${commit}' to '${stage}' stage [${targetLabel}]${flagMarkers}${dryRunLabel}...`);
 
     // Create GitHub deployment if repo is configured (skip in dry-run)
     let ghDeployment: any = null;
     if (repo && !dryRun) {
-        ghDeployment = github.createDeployment(repo, commit, stage, `Deploy ${appAlias} to ${stage}`);
+        ghDeployment = github.createDeployment(repo, commit, stage, description, {
+            productionEnvironment: production,
+            transientEnvironment: transient,
+        });
         if (ghDeployment) {
             github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Deploying ${appAlias}`);
             cleanupContext.repo = repo;

@@ -24,12 +24,23 @@ node src/index.js deploy <stage> <commit> --api          # Only update API Gatew
 node src/index.js deploy <stage> <commit> --sns          # Only update SNS topics
 node src/index.js deploy <stage> <commit> --api-filter=<api-name>  # Deploy specific API
 
+# GitHub Deployment metadata (when 'repo' is configured)
+node src/index.js deploy <stage> <commit> --description="hotfix: cache fix"  # Override deployment description
+node src/index.js deploy <stage> <commit> --transient    # Force transient_environment=true
+node src/index.js deploy <stage> <commit> --no-transient # Force transient_environment=false
+#   - description defaults to the commit subject line (git log -1 --format=%s), else "Deploy {app}-{commit} to {stage}"
+#   - transient_environment is auto-detected: true when the commit is not on the default branch (feature/PR deploys)
+#   - production_environment is set true for stages marked "production": true in cicd.json
+#   - deploying a "production": true stage prompts for confirmation (bypass with --force; non-TTY requires --force)
+
 # Rollback a stage to a previous deployment
 node src/index.js rollback <stage>            # Rollback to the most recent prior successful deployment
 node src/index.js rollback <stage> <commit>   # Rollback to a specific commit
+node src/index.js rollback <stage> --description="revert bad release"  # Override deployment description
 
-# Options (same as deploy): --env, --api, --sns, --api-filter=<name>, --verbose
+# Options (same as deploy): --env, --api, --sns, --api-filter=<name>, --verbose, --description=<text>
 # Requires 'repo' in cicd.json (uses GitHub Deployments API for history)
+# Rollback of a "production": true stage shows a PRODUCTION confirmation prompt
 
 # Get deployment information
 node src/index.js info              # Show current deployments for all stages
@@ -52,6 +63,7 @@ The entire deployment system is driven by `cicd.json`, validated against `cicd.s
 - API Gateway REST APIs with Lambda integrations
 - SNS topics with Lambda subscribers
 - Stage configurations with custom domain mappings
+- Per-stage `production: true` flag — marks the stage as a GitHub production environment and gates deploy/rollback behind a confirmation prompt
 
 ### Special Environment Variable Resolution
 

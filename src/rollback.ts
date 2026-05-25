@@ -12,17 +12,8 @@ import * as credentials from './shared/credentials';
 import * as logger from './shared/logger';
 import * as github from './shared/github';
 import { printHeader } from './shared/header';
-import * as readline from 'readline';
-
-function prompt(question: string): Promise<string> {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    return new Promise(resolve => {
-        rl.question(question, (answer: string) => {
-            rl.close();
-            resolve(answer.trim().toLowerCase());
-        });
-    });
-}
+import { prompt } from './shared/prompt';
+import { getCommitSubject } from './shared/utils';
 
 // When no commit is given, let the user pick a target from the rollback window.
 // `current` (window[0]) is excluded since you can't roll back to what's live.
@@ -82,6 +73,7 @@ async function main(): Promise<void> {
 
     // Validate stage exists
     await cicd.setStageConfig(stage);
+    const production = !!(await cicd.getCurrentStageConfig()).production;
 
     // Read keep window (rollback window). The keep set IS the rollback window — any
     // commit not in the last N successful deployments is unrecoverable because
@@ -150,7 +142,10 @@ async function main(): Promise<void> {
     console.log();
 
     if (!dryRun) {
-        const answer = await prompt(`Proceed with rollback? (y/N) `);
+        const question = production
+            ? `Roll back PRODUCTION stage '${stage}'? (y/N) `
+            : `Proceed with rollback? (y/N) `;
+        const answer = await prompt(question);
         if (answer !== 'y' && answer !== 'yes') {
             console.log('Rollback aborted.');
             process.exit(0);
@@ -160,6 +155,9 @@ async function main(): Promise<void> {
     // Execute rollback
     const commit = target.ref;
     const appAlias = `${app}-${commit}`;
+    // Deployment description: explicit --description override, else the target
+    // commit's subject line, else a generated fallback.
+    const description = o.description || getCommitSubject(commit) || `Rollback ${appAlias} on ${stage}`;
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
 
     // Safety check: verify rollback target aliases exist (Lambda mode only)
@@ -193,7 +191,9 @@ async function main(): Promise<void> {
     // Create GitHub deployment for the rollback (skip in dry-run)
     let ghDeployment: any = null;
     if (!dryRun) {
-        ghDeployment = github.createDeployment(repo, commit, stage, `Rollback ${appAlias} on ${stage}`);
+        ghDeployment = github.createDeployment(repo, commit, stage, description, {
+            productionEnvironment: production,
+        });
         if (ghDeployment) {
             github.updateDeploymentStatus(repo, ghDeployment.id, 'in_progress', `Rolling back to ${appAlias}`);
         }
