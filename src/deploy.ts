@@ -238,6 +238,15 @@ async function main(): Promise<void> {
 
         if( processWeb ) {
             webResults = await cicd.processWeb(stage,appAlias,commit,webFilter,dryRun);
+            // An empty web result means web exports exist but none apply to this
+            // stage (processWeb already warned). Treat that as a failure — rather
+            // than a phantom "success" deployment — when web is the only thing
+            // this invocation could have done: either web was explicitly scoped,
+            // or the repo configures nothing but web.
+            const webOnlyRepo = exportsList.length > 0 && exportsList.every(e => e.type === 'web') && workersList.length === 0;
+            if (webResults && webResults.exports.length === 0 && (!!o.web || !!webFilter || webOnlyRepo)) {
+                throw new Error(`No web export applies to stage '${stage}' — nothing was deployed. Check the 'stages' lists on the web exports in cicd.json.`);
+            }
         }
 
         if (plugins.length > 0) {
