@@ -24,7 +24,7 @@ import * as credentials from './shared/credentials';
 import * as logger from './shared/logger';
 import * as github from './shared/github';
 import * as ecs from './shared/ecs';
-import * as cloudfront from './shared/cloudfront';
+import * as s3 from './shared/s3';
 import { printHeader } from './shared/header';
 import { loadPlugins } from './shared/plugins';
 import { runInfoPlugins } from './shared/plugin-runner';
@@ -307,30 +307,36 @@ async function main(): Promise<void> {
         workerResults.push({ name: w.value!, commits });
     }
 
-    // Collect web export deployment state per stage from CloudFront origin
-    // paths. Gathered unconditionally (not just --verbose) so web-only stages
-    // are reflected in the Stages summary instead of showing "not deployed".
+    // Collect web export deployment state per stage. GitHub deployments are the
+    // source of truth (recentByStage); the S3 live marker is a backup used when
+    // GitHub is unavailable (no 'repo'), and a cross-check that flags drift when
+    // the two disagree (e.g. S3 tampering or a half-failed deploy). Gathered
+    // unconditionally (not just --verbose) so web-only stages are reflected in
+    // the Stages summary instead of showing "not deployed".
     const app: string = await cicd.getConfig('app');
-    const webExportsInfo: Array<{ name: string; distribution: string; perStage: Map<string, string> }> = [];
+    const webExportsInfo: Array<{ name: string; distribution: string; perStage: Map<string, string>; notes: Map<string, string> }> = [];
     const webExports: ExportConfig[] = await cicd.getExportsByType('web');
     for (const w of webExports) {
         const distribution = w.distributionValue!;
         const perStage = new Map<string, string>();
+        const notes = new Map<string, string>();
         for (const stage of stages) {
             if (w.stages && !w.stages.includes(stage.stage)) continue;
-            let commit = 'not deployed';
+            const githubCommit = recentByStage.get(stage.stage);
+            let markerCommit: string | undefined;
             try {
-                const originPath = await cloudfront.getOriginPath(distribution, stage.stage);
-                if (originPath) {
-                    const parts = originPath.split('/').filter(p => p);
-                    commit = (parts.length >= 2 && parts[0] === stage.stage) ? parts[1] : originPath;
-                }
+                const marker = await s3.getJson<{ commit?: string }>(w.value!, cicd.liveMarkerKey(stage.stage));
+                markerCommit = marker?.commit;
             } catch (e: any) {
-                commit = `error: ${e.message}`;
+                notes.set(stage.stage, `  (marker read error: ${e.message})`);
+            }
+            const commit = githubCommit ?? markerCommit ?? 'not deployed';
+            if (githubCommit && markerCommit && githubCommit !== markerCommit) {
+                notes.set(stage.stage, `  (marker: ${markerCommit} — drift)`);
             }
             perStage.set(stage.stage, commit);
         }
-        webExportsInfo.push({ name: w.name, distribution, perStage });
+        webExportsInfo.push({ name: w.name, distribution, perStage, notes });
     }
 
     // Normalize a stored commit key to the bare commit. API stages store the
@@ -444,7 +450,8 @@ async function main(): Promise<void> {
                 for (const stage of stages) {
                     if (!we.perStage.has(stage.stage)) continue;
                     const commit = we.perStage.get(stage.stage)!;
-                    console.log(`    ${stage.stage.padEnd(15)} ${commit}${driftLabel(stage.stage, commit)}${branchAnnotation(commit)}`);
+                    const note = we.notes.get(stage.stage) ?? '';
+                    console.log(`    ${stage.stage.padEnd(15)} ${commit}${note}${branchAnnotation(commit)}`);
                 }
             }
         }

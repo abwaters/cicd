@@ -101,6 +101,28 @@ The core orchestration module follows this flow:
    - **Permissions**: Adds Lambda permissions for SNS invocation
    - **Stage Filtering**: Honors `stages` array in SNS config to limit deployments
 
+5. **Web Deployment** (`processWeb()` / `processWebRollback()`)
+   - For `exports` of `type: "web"` (S3 + CloudFront static sites). Each carries `name`
+     (CFN export → S3 bucket) and `distribution` (CFN export → CloudFront distribution ID).
+   - **Static origin**: the CloudFront origin path is a fixed `/{stage}/live`, set **once in
+     CloudFormation**. The CLI **never mutates the distribution** — that per-deploy rewrite
+     caused infrastructure problems and was removed.
+   - **S3 layout per stage**:
+     - `{stage}/{commit}/` — "dark" build uploaded each deploy; the rollback source.
+     - `{stage}/live/` — what CloudFront serves (mirrors the active commit).
+     - `{stage}/.cicd-live.json` — `{commit, deployedAt}` marker, written each deploy. Lives
+       outside `live/` so the origin can never serve it.
+   - **Deploy = pure S3 ops**: upload `{stage}/{commit}/` → `s3.syncPrefix()` copy-then-prune
+     into `{stage}/live/` (no empty window) → write the marker → invalidate `/*`. A read-only
+     check warns (never changes) if the distribution's origin path is not yet `/{stage}/live`.
+   - **Rollback**: re-syncs an existing `{stage}/{commit}/` into `live/` (no upload); errors if
+     that prefix was pruned by `clean`.
+   - **Live-commit source of truth**: GitHub deployments (via `buildKeepSet`). `info`/`clean`
+     read the marker as a backup (used when `repo` is absent) and cross-check; a marker that
+     disagrees with GitHub's most-recent commit is reported as drift.
+   - **Migration**: point each distribution's origin at `/{stage}/live` in CloudFormation once.
+     A deploy populates `{stage}/live/` + marker; until infra is updated the CLI prints a warning.
+
 ### Versioning Strategy
 
 Git commit-based versioning ties everything together:
