@@ -89,8 +89,8 @@ describe('printDeploymentSummary', () => {
         const parts = printDeploymentSummary({
             web: {
                 exports: [
-                    { name: 'site', bucket: 'b', distribution: 'd', originPath: '/dev/abc', fileCount: 12, totalBytes: 1234, noindexInjected: false },
-                    { name: 'admin', bucket: 'b', distribution: 'd', originPath: '/dev/abc', fileCount: 3, totalBytes: 99, noindexInjected: true, invalidationId: 'I1' },
+                    { name: 'site', bucket: 'b', distribution: 'd', liveCommit: 'abc', livePath: '/dev/live', fileCount: 12, totalBytes: 1234, noindexInjected: false },
+                    { name: 'admin', bucket: 'b', distribution: 'd', liveCommit: 'abc', livePath: '/dev/live', fileCount: 3, totalBytes: 99, noindexInjected: true, invalidationId: 'I1' },
                 ],
             },
         });
@@ -120,7 +120,7 @@ describe('printDeploymentSummary', () => {
         const parts = printDeploymentSummary({
             env: [{ name: 'fn', updated: true, varCount: 1 }],
             api: { functions: [], apis: [{ name: 'a', deployment: 'created', stage: 'updated', mapping: 'existing', throttle: '', functions: 0 }] },
-            web: { exports: [{ name: 'site', bucket: 'b', distribution: 'd', originPath: '/x', fileCount: 1, totalBytes: 1, noindexInjected: false }] },
+            web: { exports: [{ name: 'site', bucket: 'b', distribution: 'd', liveCommit: 'abc', livePath: '/dev/live', fileCount: 1, totalBytes: 1, noindexInjected: false }] },
         });
         expect(parts).toEqual([
             '1 functions configured',
@@ -155,7 +155,7 @@ describe('printDeploymentSummary', () => {
             sns: null,
             sqs: null,
             workers: null,
-            web: { exports: [{ name: 'site', bucket: 'b', distribution: 'd', originPath: '/staging/abc', fileCount: 115, totalBytes: 6630255, noindexInjected: true, invalidationId: 'I1' }] },
+            web: { exports: [{ name: 'site', bucket: 'b', distribution: 'd', liveCommit: 'abc', livePath: '/staging/live', fileCount: 115, totalBytes: 6630255, noindexInjected: true, invalidationId: 'I1' }] },
         });
         expect(parts).toEqual(['1 web export(s) deployed (115 files)']);
     });
@@ -164,7 +164,7 @@ describe('printDeploymentSummary', () => {
         const parts = printDeploymentSummary({
             web: {
                 exports: [
-                    { name: 'site', bucket: 'b', distribution: 'd', originPath: '/staging/abc', fileCount: 115, totalBytes: 0, noindexInjected: false, invalidationId: 'I1', restored: true },
+                    { name: 'site', bucket: 'b', distribution: 'd', liveCommit: 'abc', livePath: '/staging/live', fileCount: 115, totalBytes: 0, noindexInjected: false, invalidationId: 'I1', restored: true },
                 ],
             },
         });

@@ -1,7 +1,6 @@
 import {
     CloudFrontClient,
     GetDistributionConfigCommand,
-    UpdateDistributionCommand,
     CreateInvalidationCommand,
     DistributionConfig
 } from "@aws-sdk/client-cloudfront";
@@ -34,36 +33,6 @@ async function getDistributionConfig(distributionId: string): Promise<Distributi
     return { eTag: resp.ETag, config: resp.DistributionConfig };
 }
 
-async function updateOriginPath(
-    distributionId: string,
-    originId: string,
-    originPath: string
-): Promise<void> {
-    const cf = await getClient();
-    const { eTag, config } = await getDistributionConfig(distributionId);
-
-    const origins = config.Origins?.Items ?? [];
-    const target = origins.find(o => o.Id === originId);
-    if (!target) {
-        const ids = origins.map(o => o.Id).join(', ') || '(none)';
-        throw new Error(
-            `updateOriginPath: distribution '${distributionId}' has no origin with id '${originId}' (origins: ${ids})`
-        );
-    }
-
-    if (target.OriginPath === originPath) {
-        // No-op: already on the requested path.
-        return;
-    }
-    target.OriginPath = originPath;
-
-    await awsRetry(() => cf.send(new UpdateDistributionCommand({
-        Id: distributionId,
-        IfMatch: eTag,
-        DistributionConfig: config
-    })));
-}
-
 async function getOriginPath(distributionId: string, originId: string): Promise<string | null> {
     const { config } = await getDistributionConfig(distributionId);
     const origins = config.Origins?.Items ?? [];
@@ -89,7 +58,6 @@ async function createInvalidation(distributionId: string, paths: string[]): Prom
 
 export {
     getDistributionConfig,
-    updateOriginPath,
     getOriginPath,
     createInvalidation
 };

@@ -881,6 +881,29 @@ async function processSQS(stage: string, appAlias: string, commit: string, dryRu
 const NOINDEX_ROBOTS_BODY = 'User-agent: *\nDisallow: /\n';
 const NOCACHE = 'no-cache, no-store, must-revalidate';
 
+// Key for the live-commit marker. Lives directly under the stage prefix — NOT
+// under `{stage}/live/` — so the static `/{stage}/live` origin can never serve
+// it. GitHub deployments are the source of truth; this marker is a backup that
+// records what the last successful swap actually placed into `live/`.
+function liveMarkerKey(stage: string): string {
+    return `${stage}/.cicd-live.json`;
+}
+
+// Read-only safety check. The CLI no longer mutates the distribution — the
+// origin path is expected to be a static `/{stage}/live` set in CloudFormation.
+// Warn (never change) if a distribution still points elsewhere, e.g. an
+// unmigrated `/{stage}/{commit}` path. Never fails the deploy.
+async function warnIfOriginPathDrift(distribution: string, stage: string, expected: string): Promise<void> {
+    try {
+        const op = await cloudfront.getOriginPath(distribution, stage);
+        if (op !== null && op !== expected) {
+            console.warn(`   ! WARNING: CloudFront origin '${stage}' OriginPath is '${op}', expected '${expected}'. Update CloudFormation to point this origin at '${expected}'.`);
+        }
+    } catch (e: any) {
+        logger.verbose(`   - origin-path check skipped for ${stage}: ${e.message}`);
+    }
+}
+
 async function processWeb(stage: string, appAlias: string, commit: string, webFilter?: string, dryRun: boolean = false): Promise<WebResult | null> {
     const all = await getExportsByType('web', webFilter);
     if (all.length === 0) {
@@ -898,24 +921,30 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
         const bucket = cfg.value!;
         const distribution = cfg.distributionValue!;
         const source = path.resolve(process.cwd(), cfg.source ?? './dist');
-        const keyPrefix = `${stage}/${commit}`;
-        const originPath = `/${stage}/${commit}`;
+        const commitPrefix = `${stage}/${commit}`;
+        const livePrefix = `${stage}/live`;
+        const staticOrigin = `/${stage}/live`;
+        const markerKey = liveMarkerKey(stage);
         const noindex = !!(cfg.noindexStages && cfg.noindexStages.includes(stage));
 
-        logger.verbose(` * Web '${cfg.name}' → s3://${bucket}/${keyPrefix}/  (distribution ${distribution})`);
+        logger.verbose(` * Web '${cfg.name}' → s3://${bucket}/${commitPrefix}/ then live at s3://${bucket}/${livePrefix}/  (distribution ${distribution})`);
+
+        await warnIfOriginPathDrift(distribution, stage, staticOrigin);
 
         if (dryRun) {
-            logger.verbose(`   - WOULD upload '${source}' to s3://${bucket}/${keyPrefix}/`);
+            logger.verbose(`   - WOULD upload '${source}' to s3://${bucket}/${commitPrefix}/`);
             if (noindex) {
                 logger.verbose(`   - WOULD inject Disallow:/ robots.txt for noindex stage '${stage}'`);
             }
-            logger.verbose(`   - WOULD set CloudFront origin '${stage}' OriginPath to '${originPath}'`);
+            logger.verbose(`   - WOULD sync s3://${bucket}/${commitPrefix}/ → s3://${bucket}/${livePrefix}/ (copy then prune)`);
+            logger.verbose(`   - WOULD write live marker s3://${bucket}/${markerKey} (commit ${commit})`);
             logger.verbose(`   - WOULD invalidate /* on distribution '${distribution}'`);
             exports.push({
                 name: cfg.name,
                 bucket,
                 distribution,
-                originPath,
+                liveCommit: commit,
+                livePath: staticOrigin,
                 fileCount: 0,
                 totalBytes: 0,
                 noindexInjected: noindex
@@ -923,16 +952,19 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
             continue;
         }
 
-        const { fileCount, totalBytes } = await s3.uploadDirectory(bucket, keyPrefix, source);
+        const { fileCount, totalBytes } = await s3.uploadDirectory(bucket, commitPrefix, source);
         logger.verbose(`   - uploaded ${fileCount} files (${totalBytes} bytes)`);
 
         if (noindex) {
-            await s3.putObject(bucket, `${keyPrefix}/robots.txt`, NOINDEX_ROBOTS_BODY, 'text/plain; charset=utf-8', NOCACHE);
+            await s3.putObject(bucket, `${commitPrefix}/robots.txt`, NOINDEX_ROBOTS_BODY, 'text/plain; charset=utf-8', NOCACHE);
             logger.verbose(`   - injected Disallow:/ robots.txt for noindex stage '${stage}'`);
         }
 
-        await cloudfront.updateOriginPath(distribution, stage, originPath);
-        logger.verbose(`   - CloudFront origin '${stage}' OriginPath = '${originPath}'`);
+        const synced = await s3.syncPrefix(bucket, `${commitPrefix}/`, `${livePrefix}/`);
+        logger.verbose(`   - synced ${synced} object(s) to s3://${bucket}/${livePrefix}/`);
+
+        await s3.putObject(bucket, markerKey, JSON.stringify({ commit, deployedAt: new Date().toISOString() }), 'application/json; charset=utf-8', NOCACHE);
+        logger.verbose(`   - wrote live marker s3://${bucket}/${markerKey} (commit ${commit})`);
 
         const invalidationId = await cloudfront.createInvalidation(distribution, ['/*']);
         logger.verbose(`   - invalidation '${invalidationId}' created`);
@@ -941,7 +973,8 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
             name: cfg.name,
             bucket,
             distribution,
-            originPath,
+            liveCommit: commit,
+            livePath: staticOrigin,
             invalidationId,
             fileCount,
             totalBytes,
@@ -962,8 +995,9 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
 
 // Web rollback restores a previously-deployed artifact rather than re-uploading
 // the current working tree. The target commit's objects already live at
-// s3://{bucket}/{stage}/{commit}/ from its original deploy, so rollback only
-// repoints the CloudFront origin to that prefix and invalidates — no upload.
+// s3://{bucket}/{stage}/{commit}/ from its original deploy, so rollback re-syncs
+// that prefix into the static `{stage}/live/` directory, rewrites the live
+// marker, and invalidates — no upload, and the distribution is never touched.
 // Errors clearly if the prefix is gone (e.g. pruned by `clean`).
 async function processWebRollback(stage: string, commit: string, webFilter?: string, dryRun: boolean = false): Promise<WebResult | null> {
     const all = await getExportsByType('web', webFilter);
@@ -981,28 +1015,34 @@ async function processWebRollback(stage: string, commit: string, webFilter?: str
 
         const bucket = cfg.value!;
         const distribution = cfg.distributionValue!;
-        const keyPrefix = `${stage}/${commit}`;
-        const originPath = `/${stage}/${commit}`;
+        const commitPrefix = `${stage}/${commit}`;
+        const livePrefix = `${stage}/live`;
+        const staticOrigin = `/${stage}/live`;
+        const markerKey = liveMarkerKey(stage);
 
         // The artifact must already exist in S3 — rollback restores it, never uploads.
-        const keys = await s3.listObjectsByPrefix(bucket, `${keyPrefix}/`);
+        const keys = await s3.listObjectsByPrefix(bucket, `${commitPrefix}/`);
         if (keys.length === 0) {
             throw new Error(
-                `Cannot roll back web '${cfg.name}' to '${commit}': no objects at s3://${bucket}/${keyPrefix}/ ` +
+                `Cannot roll back web '${cfg.name}' to '${commit}': no objects at s3://${bucket}/${commitPrefix}/ ` +
                 `(the artifact may have been pruned by 'clean'). Re-deploy that commit instead.`
             );
         }
 
-        logger.verbose(` * Web '${cfg.name}' → restore s3://${bucket}/${keyPrefix}/  (distribution ${distribution})`);
+        logger.verbose(` * Web '${cfg.name}' → restore s3://${bucket}/${commitPrefix}/ to s3://${bucket}/${livePrefix}/  (distribution ${distribution})`);
+
+        await warnIfOriginPathDrift(distribution, stage, staticOrigin);
 
         if (dryRun) {
-            logger.verbose(`   - WOULD set CloudFront origin '${stage}' OriginPath to '${originPath}' (${keys.length} existing objects)`);
+            logger.verbose(`   - WOULD sync s3://${bucket}/${commitPrefix}/ → s3://${bucket}/${livePrefix}/ (${keys.length} existing objects)`);
+            logger.verbose(`   - WOULD write live marker s3://${bucket}/${markerKey} (commit ${commit}, restored)`);
             logger.verbose(`   - WOULD invalidate /* on distribution '${distribution}'`);
             exports.push({
                 name: cfg.name,
                 bucket,
                 distribution,
-                originPath,
+                liveCommit: commit,
+                livePath: staticOrigin,
                 fileCount: keys.length,
                 totalBytes: 0,
                 noindexInjected: false,
@@ -1011,8 +1051,11 @@ async function processWebRollback(stage: string, commit: string, webFilter?: str
             continue;
         }
 
-        await cloudfront.updateOriginPath(distribution, stage, originPath);
-        logger.verbose(`   - CloudFront origin '${stage}' OriginPath = '${originPath}'`);
+        const synced = await s3.syncPrefix(bucket, `${commitPrefix}/`, `${livePrefix}/`);
+        logger.verbose(`   - synced ${synced} object(s) to s3://${bucket}/${livePrefix}/`);
+
+        await s3.putObject(bucket, markerKey, JSON.stringify({ commit, deployedAt: new Date().toISOString(), restored: true }), 'application/json; charset=utf-8', NOCACHE);
+        logger.verbose(`   - wrote live marker s3://${bucket}/${markerKey} (commit ${commit}, restored)`);
 
         const invalidationId = await cloudfront.createInvalidation(distribution, ['/*']);
         logger.verbose(`   - invalidation '${invalidationId}' created`);
@@ -1021,7 +1064,8 @@ async function processWebRollback(stage: string, commit: string, webFilter?: str
             name: cfg.name,
             bucket,
             distribution,
-            originPath,
+            liveCommit: commit,
+            livePath: staticOrigin,
             invalidationId,
             fileCount: keys.length,
             totalBytes: 0,
@@ -1412,6 +1456,7 @@ export {
     processSQS,
     processWeb,
     processWebRollback,
+    liveMarkerKey,
     processWorkers,
     processFargateDeploy,
     processFargateRestart,

@@ -279,12 +279,13 @@ export interface WebExportResult {
     name: string;
     bucket: string;
     distribution: string;
-    originPath: string;
+    liveCommit: string;   // commit now serving at {stage}/live
+    livePath: string;     // '/{stage}/live' (static origin path), for display
     invalidationId?: string;
     fileCount: number;
     totalBytes: number;
     noindexInjected: boolean;
-    restored?: boolean;   // rollback: origin repointed to an existing artifact (no upload)
+    restored?: boolean;   // rollback: live/ repointed to an existing artifact (no upload)
 }
 
 export interface WebResult {
