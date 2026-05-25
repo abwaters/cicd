@@ -296,7 +296,9 @@ async function main(): Promise<void> {
     // ── Print summary ─────────────────────────────────────────────────
 
     const parts = printDeploymentSummary({ env: envResults, api: apiResults, sns: snsResults, sqs: sqsResults, workers: workerResults, web: webResults, pluginResults });
-    console.log(`\nRollback complete: ${parts.join(', ')}`);
+    if (parts.length > 0) {
+        console.log(`\nRollback complete: ${parts.join(', ')}`);
+    }
 
     // Verify rollback (skip in dry-run)
     if (!dryRun) {
