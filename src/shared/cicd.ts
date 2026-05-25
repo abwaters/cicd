@@ -287,13 +287,14 @@ async function getExportByName(name: string): Promise<ExportConfig | null> {
 
 async function getExportsByType(type: string, filter?: string): Promise<ExportConfig[]> {
     await init();
-    if( filter ) {
-        const exports = [...exportMap.values()];
-        return exports.filter( resource => resource.type === type && resource.name === filter );
-    }else{
-        const exports = [...exportMap.values()];
-        return exports.filter( resource => resource.type === type);
-    }
+    // Read from the full config list rather than exportMap. exportMap is keyed by
+    // CloudFormation export name, so multiple exports that legitimately share a
+    // name — e.g. two web exports for the same S3 bucket but different CloudFront
+    // distributions — collapse into one. init() has already resolved `value` and
+    // `distributionValue` onto these same config objects, so the duplicates carry
+    // their resolved values here.
+    const exports: ExportConfig[] = (await getConfig('exports')) || [];
+    return exports.filter( resource => resource.type === type && (!filter || resource.name === filter) );
 }
 
 async function getWorkers(stage?: string): Promise<WorkerFunctionConfig[]> {
@@ -946,6 +947,14 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
             totalBytes,
             noindexInjected: noindex
         });
+    }
+
+    // Web exports are configured but every one of them is scoped (via `stages`)
+    // to other stages, so this deploy uploaded nothing. Surface it loudly — a
+    // silent empty result would otherwise be reported as a successful deploy.
+    if (exports.length === 0) {
+        const scoped = all.map(c => `${c.name} → [${(c.stages || ['*']).join(', ')}]`).join('; ');
+        console.warn(`   ! WARNING: no web export applies to stage '${stage}' — nothing was uploaded. Configured web exports: ${scoped}`);
     }
 
     return { exports };
