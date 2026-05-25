@@ -22,7 +22,11 @@ function getOptions(args: string[]): CLIOptions {
     for(const arg of args) {
         if( arg.startsWith('--') ) {
             if( arg.includes('=') ) {
-                let [name,value] = arg.substring(2).split('=');
+                // Split on the first '=' only so values that themselves contain
+                // '=' (e.g. --description="x=y") are preserved intact.
+                const eq = arg.indexOf('=');
+                const name = arg.substring(2, eq);
+                const value = arg.substring(eq + 1);
                 options[camelCaseOption(name)] = value;
             }else{
                 options[camelCaseOption(arg.substring(2))] = true;

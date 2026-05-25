@@ -374,6 +374,10 @@
             "type": "string",
             "description": "Fargate task memory in MiB (e.g., 512, 1024, 2048). Must be a valid combination with cpu.",
             "pattern": "^[0-9]+$"
+          },
+          "production": {
+            "type": "boolean",
+            "description": "Marks this stage as a production environment: sets production_environment on the GitHub deployment and requires confirmation before deploy/rollback (bypass with --force)."
           }
         },
         "additionalProperties": false
