@@ -48,7 +48,7 @@
     "@aws-sdk/client-cloudformation": "^3.1053.0",
     "@aws-sdk/client-cloudfront": "^3.1053.0",
     "@aws-sdk/client-ecr": "^3.1053.0",
-    "@aws-sdk/client-ecs": "^3.1049.0",
+    "@aws-sdk/client-ecs": "^3.1053.0",
     "@aws-sdk/client-lambda": "^3.1049.0",
     "@aws-sdk/client-s3": "^3.1049.0",
     "@aws-sdk/client-sns": "^3.1045.0",
