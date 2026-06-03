@@ -50,7 +50,7 @@
     "semantic-release": "semantic-release"
   },
   "publishConfig": {
-    "provenance": true
+    "access": "public"
   },
   "jest": {
     "preset": "ts-jest",
