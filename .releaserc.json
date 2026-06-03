@@ -21,7 +21,7 @@
     }],
     ["@semantic-release/npm", { "npmPublish": true }],
     ["@semantic-release/exec", {
-      "publishCmd": "npm publish --registry=https://npm.pkg.github.com"
+      "publishCmd": "npm publish --registry=https://npm.pkg.github.com --no-provenance"
     }],
     "@semantic-release/github"
   ]
