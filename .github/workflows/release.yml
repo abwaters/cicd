@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Allow one release at a time; never cancel an in-flight publish.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the GitHub Release + git tag
+  issues: write # semantic-release comments on released issues
+  pull-requests: write # semantic-release comments on released PRs
+  id-token: write # npm provenance + future OIDC Trusted Publishing
+  packages: write # publish to GitHub Packages
+
+jobs:
+  release:
+    name: semantic-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags for version analysis
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Configure dual-registry auth
+        # Scoped package: one .npmrc scope line can only target one registry, so we
+        # authenticate both registries by URL and let each publish pick its target
+        # via --registry. Public npm is the default; GitHub Packages is explicit.
+        run: |
+          {
+            echo "//registry.npmjs.org/:_authToken=\${NPM_TOKEN}"
+            echo "//npm.pkg.github.com/:_authToken=\${GITHUB_TOKEN}"
+          } > .npmrc
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

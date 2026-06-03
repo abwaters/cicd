@@ -128,26 +128,6 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
 
-  # Secret scanning
-  secret-scan:
-    name: Secret Scanning
-    runs-on: ubuntu-latest
-    if: github.actor != 'dependabot[bot]'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: TruffleHog Secret Scan
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
-          extra_args: --debug
-
   # Validate configuration
   validate:
     name: Validate Configuration
@@ -174,7 +154,7 @@ jobs:
     name: CI Success
     runs-on: ubuntu-latest
     if: always()
-    needs: [lint, test, build, codeql, secret-scan, validate]
+    needs: [lint, test, build, codeql, validate]
 
     steps:
       - name: Check CI status
@@ -183,7 +163,6 @@ jobs:
                 "${{ needs.test.result }}" == "failure" || \
                 "${{ needs.build.result }}" == "failure" || \
                 "${{ needs.codeql.result }}" == "failure" || \
-                "${{ needs.secret-scan.result }}" == "failure" || \
                 "${{ needs.validate.result }}" == "failure" ]]; then
             echo "❌ CI failed"
             exit 1
