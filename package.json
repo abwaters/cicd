@@ -25,7 +25,11 @@
     "info": "node dist/index.js info",
     "clean": "node dist/index.js clean",
     "validate": "node dist/index.js validate",
-    "test": "jest"
+    "test": "jest",
+    "semantic-release": "semantic-release"
+  },
+  "publishConfig": {
+    "provenance": true
   },
   "jest": {
     "preset": "ts-jest",
@@ -69,9 +73,16 @@
     "ajv": "^8.20.0"
   },
   "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/github": "^12.0.8",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.1",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
     "jest": "^30.4.2",
+    "semantic-release": "^25.0.3",
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
