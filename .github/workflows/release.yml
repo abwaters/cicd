@@ -33,6 +33,10 @@ jobs:
         with:
           node-version: "22" # semantic-release requires Node >= 22.14
 
+      - name: Upgrade npm
+        # Trusted Publishing (OIDC) requires npm >= 11.5.1; Node 22 ships npm 10.x.
+        run: npm install -g npm@latest
+
       - name: Configure dual-registry auth
         # Scoped package: one .npmrc scope line can only target one registry, so we
         # authenticate both registries by URL and let each publish pick its target
