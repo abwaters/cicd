@@ -1,18 +1,39 @@
 {
   "name": "@abwaters/cicd",
   "version": "1.1.0",
-  "description": "AWS CI/CD deployment tool for Lambda, API Gateway, and SNS",
+  "description": "Opinionated AWS CI/CD tool with git-commit-based deploys, GitHub-tracked rollback, and a plugin architecture (Lambda, API Gateway, SNS, SQS, Fargate, S3+CloudFront).",
   "license": "MIT",
-  "author": "",
+  "author": "Bryan Waters <bryanw@abwaters.com>",
   "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/types.d.ts",
   "bin": {
     "cicd": "./dist/index.js"
   },
+  "keywords": [
+    "aws",
+    "cicd",
+    "cli",
+    "cloudformation",
+    "deployment",
+    "deploy",
+    "rollback",
+    "lambda",
+    "api-gateway",
+    "sns",
+    "sqs",
+    "fargate",
+    "cloudfront",
+    "s3",
+    "serverless"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/abwaters/cicd.git"
+  },
+  "homepage": "https://github.com/abwaters/cicd#readme",
+  "bugs": {
+    "url": "https://github.com/abwaters/cicd/issues"
   },
   "files": [
     "dist/",
