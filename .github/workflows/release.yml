@@ -31,8 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+          node-version: "22" # semantic-release requires Node >= 22.14
 
       - name: Configure dual-registry auth
         # Scoped package: one .npmrc scope line can only target one registry, so we
