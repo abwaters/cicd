@@ -146,8 +146,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate cicd.json
-        run: npm run validate
+      - name: Build
+        run: npm run build
+
+      - name: Validate example config (shape only)
+        # This repo is the tool itself and has no cicd.json of its own, so we
+        # validate the shipped template to guard against schema drift. --skip-aws
+        # checks shape only (no AWS credentials / variable resolution).
+        run: |
+          cp cicd.example.json cicd.json
+          npm run validate -- --skip-aws
 
   # Summary check
   ci-success:
