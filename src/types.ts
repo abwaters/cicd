@@ -81,7 +81,8 @@ export interface WorkerFunctionConfig {
 
 export interface StageConfig {
     stage: string;
-    mapping: StageMapping;
+    mapping?: StageMapping;
+    cloudfront?: StageCloudFront;
     environment?: Record<string, string>;
     throttle?: ThrottleSettings;
     service?: string;
@@ -95,6 +96,18 @@ export interface StageConfig {
 export interface StageMapping {
     domain: string;
     path: string;
+}
+
+// Serves a stage's API Gateway REST APIs through an existing CloudFront
+// distribution at a path prefix (e.g. /api), instead of (or alongside) a custom
+// domain. The distribution's API origin and cache behavior are owned by
+// CloudFormation; cicd only validates (drift-check) and invalidates.
+export interface StageCloudFront {
+    distribution: string;        // CFN export name → CloudFront distribution ID
+    path?: string;               // path-prefix segment (default 'api' → /api/*)
+    invalidate?: boolean;        // invalidate the mapped path after deploy (default true)
+    cachePolicy?: string;        // expected cache policy id/name (drift validation only)
+    distributionValue?: string;  // resolved at runtime (CloudFront distribution ID)
 }
 
 // ─── CLI Options ─────────────────────────────────────────────────────────────
@@ -220,7 +233,8 @@ export interface APIDeploymentResult {
     name: string;
     deployment: 'created' | 'existing';
     stage: 'created' | 'updated';
-    mapping: 'created' | 'existing' | 'moved';
+    mapping: 'created' | 'existing' | 'moved' | 'skipped';
+    cloudfront?: 'ok' | 'drift' | 'missing';
     throttle: string;
     functions: number;
 }

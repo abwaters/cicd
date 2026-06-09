@@ -46,6 +46,9 @@ async function main(): Promise<void> {
             case 'invalidate':
                 require('./invalidate');
                 break;
+            case 'cloudfront':
+                require('./cloudfront');
+                break;
             case 'install':
                 require('./install');
                 break;
@@ -89,6 +92,10 @@ Commands:
   invalidate <stage> [paths]  Create CloudFront invalidations for web exports on a stage
                               Options: --web-filter=<name>, --verbose
                               Default path: /*
+
+  cloudfront <stage>          Generate the CloudFormation Origin + CacheBehavior for a
+                              CloudFront-mapped stage (paste into your template once)
+                              Options: --json, --api-filter=<name>, --verbose
 
   install                     Install any plugins listed in cicd.json that are
                               missing from node_modules (npm install --save-dev)

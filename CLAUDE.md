@@ -51,6 +51,11 @@ node src/index.js clean             # Remove unused API deployments, Lambda alia
 
 # Install plugins listed in cicd.json
 node src/index.js install           # npm install --save-dev for any plugins missing from node_modules
+
+# Generate CloudFormation for a CloudFront-mapped stage (see "CloudFront API Mapping")
+node src/index.js cloudfront <stage>          # Print the Origin + CacheBehavior YAML fragment
+node src/index.js cloudfront <stage> --json   # Emit JSON instead of YAML
+node src/index.js cloudfront <stage> --api-filter=<api-name>   # Limit to one API
 ```
 
 ## Architecture
@@ -62,7 +67,7 @@ The entire deployment system is driven by `cicd.json`, validated against `cicd.s
 - Global and stage-specific environment variables
 - API Gateway REST APIs with Lambda integrations
 - SNS topics with Lambda subscribers
-- Stage configurations with custom domain mappings
+- Stage configurations with custom domain mappings (`stages[].mapping`) and/or CloudFront mappings (`stages[].cloudfront`)
 - Per-stage `production: true` flag — marks the stage as a GitHub production environment and gates deploy/rollback behind a confirmation prompt
 
 ### Special Environment Variable Resolution
@@ -91,7 +96,7 @@ The core orchestration module follows this flow:
 
 3. **API Gateway Deployment** (`processApiGateway()`)
    - **Functions**: Creates Lambda versions (with commit as description) and aliases (format: `{app}-{commit}`)
-   - **APIs**: Creates/updates deployments, stages (with `Commit` variable), and custom domain mappings
+   - **APIs**: Creates/updates deployments, stages (with `Commit` variable), and routing (custom domain and/or CloudFront — see below)
    - **Throttling**: Applies global and stage-specific throttle settings using patch operations
    - **Permissions**: Adds Lambda permissions for API Gateway invocation
 
@@ -122,6 +127,37 @@ The core orchestration module follows this flow:
      disagrees with GitHub's most-recent commit is reported as drift.
    - **Migration**: point each distribution's origin at `/{stage}/live` in CloudFormation once.
      A deploy populates `{stage}/live/` + marker; until infra is updated the CLI prints a warning.
+
+### CloudFront API Mapping (`stages[].cloudfront`)
+
+An alternative (or addition) to custom-domain base-path mapping: serve a stage's API Gateway
+REST APIs through an **existing CloudFront distribution** at a path prefix (e.g. `/api/*`), on
+the same domain that already serves the web app — staging stage → staging distribution, prod
+stage → prod distribution. `stages[].mapping` (custom domain) and `stages[].cloudfront` are
+independent optional fields; a stage may use either or both.
+
+- **Config**: `cloudfront: { distribution, path?, invalidate?, cachePolicy? }`.
+  `distribution` is a CFN export name resolving to the distribution ID (resolved in
+  `initExports()`, same as web exports). `path` defaults to `"api"`. Each API export composes
+  its behavior pattern as `/{cloudfront.path}/{api.prefix}/{api.path}/*` via
+  `composeCloudFrontPath()` (mirrors `composeMappingPath()`).
+- **CloudFormation owns the infra** — same rule as web: the CLI **never mutates the
+  distribution**. The API-Gateway origin (`{apiId}.execute-api.{region}.amazonaws.com`,
+  `OriginPath /{stage}`) and the `/api/*` cache behavior + cache policy are defined **once in
+  CloudFormation**. Because the API stage name is stable across deploys, the distribution never
+  needs to change after initial setup.
+- **Deploy** (`processApiGatewayApis()`): deploys the API stage exactly as for custom-domain
+  mode, **skips** the base-path mapping, runs a **read-only drift check** per API
+  (`cloudfront.getCacheBehavior()` — warns, never fails, if the behavior is missing or its
+  origin `OriginPath`/cache policy don't match), and **invalidates** `/{path}/*` once per stage
+  (default on; opt out with `invalidate: false`).
+- **Generator**: `cicd cloudfront <stage>` (and the drift warning when a behavior is missing)
+  prints the ready-to-paste CloudFormation Origin + CacheBehavior fragment via
+  `buildCloudFrontFragment()` (`src/shared/cfn-cloudfront.ts`). `DomainName` is emitted as the
+  **concrete resolved endpoint** (always valid regardless of stack topology) with commented
+  same-stack `!Ref` and cross-stack `Fn::ImportValue` alternatives — `Fn::ImportValue` of an
+  export defined in the same stack is circular, so neither form is universally correct. YAML by
+  default, `--json` for JSON.
 
 ### Versioning Strategy
 

@@ -61,9 +61,10 @@
     },
     {
       "stage": "staging",
-      "mapping": {
-        "domain": "api.example.com",
-        "path": "staging"
+      "cloudfront": {
+        "distribution": "myapp-staging-distribution",
+        "path": "api",
+        "cachePolicy": "658327ea-f89d-4fab-a63d-7e88639e58f6"
       }
     }
   ]

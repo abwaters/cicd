@@ -6,6 +6,7 @@ import {
     FargateDeployResult,
     FargateRestartResult,
     StageConfig,
+    StageCloudFront,
     ThrottleSettings,
     EnvResult,
     APIFunctionResult,
@@ -38,6 +39,7 @@ import * as ps from './ps';
 import * as path from 'path';
 import * as github from './github';
 import { getConfig } from './config';
+import { buildCloudFrontFragment } from './cfn-cloudfront';
 import * as awsContext from './aws-context';
 import * as logger from './logger';
 
@@ -272,6 +274,24 @@ async function initExports(): Promise<void> {
             throw new Error(`${webMissing} web distribution export(s) could not be resolved — see errors above`);
         }
 
+        // Resolve each stage's CloudFront-mapping distribution CFN export to the
+        // distribution ID (same pattern as web exports above). Stages live outside
+        // exportMap, so resolve them directly from rawExports onto the stage config.
+        const stageConfigsForCf: StageConfig[] = (await getConfig('stages')) || [];
+        let stageCfMissing = 0;
+        for (const sc of stageConfigsForCf) {
+            if (!sc.cloudfront) continue;
+            if (rawExports.has(sc.cloudfront.distribution)) {
+                sc.cloudfront.distributionValue = rawExports.get(sc.cloudfront.distribution);
+            } else {
+                console.log(`ERROR: could not find export for stage '${sc.stage}' cloudfront distribution '${sc.cloudfront.distribution}'.`);
+                stageCfMissing++;
+            }
+        }
+        if (stageCfMissing) {
+            throw new Error(`${stageCfMissing} stage cloudfront distribution export(s) could not be resolved — see errors above`);
+        }
+
     }catch(e) {
         throw new Error(`Failed to initialize exports: ${e instanceof Error ? e.message : e}`);
     }
@@ -383,7 +403,19 @@ async function findStages(apiId: string, stage: string): Promise<Stage | null> {
 
 function composeMappingPath(stageConfig: StageConfig, api: ExportConfig): string {
     const segments: string[] = [];
-    if (stageConfig.mapping.path) segments.push(stageConfig.mapping.path);
+    if (stageConfig.mapping!.path) segments.push(stageConfig.mapping!.path);
+    if (api.prefix) segments.push(api.prefix);
+    if (api.path) segments.push(api.path);
+    return segments.join('/');
+}
+
+// Composes the CloudFront path prefix an API is served under (no leading slash):
+// {cloudfront.path|'api'}/{api.prefix}/{api.path}. The ordered cache behavior
+// pattern is this joined with '/*' (see processApiGatewayApis).
+function composeCloudFrontPath(cf: StageCloudFront, api: ExportConfig): string {
+    const segments: string[] = [];
+    const base = cf.path ?? 'api';
+    if (base) segments.push(base);
     if (api.prefix) segments.push(api.prefix);
     if (api.path) segments.push(api.path);
     return segments.join('/');
@@ -600,9 +632,24 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
         const apiId = api.value!;
         logger.verbose(` * Checking api ${api.name} [${api.value}]...`);
         if (dryRun) {
-            const path = composeMappingPath(localStageConfig, api);
-            logger.verbose(`   - WOULD create deployment, update stage '${stage}', and map to ${localStageConfig.mapping.domain}/${path}`);
-            results.push({ name: api.name, deployment: 'created', stage: 'created', mapping: 'created', throttle: 'dry-run', functions: api.functions!.length });
+            const targets: string[] = [];
+            if (localStageConfig.mapping) {
+                targets.push(`map to ${localStageConfig.mapping.domain}/${composeMappingPath(localStageConfig, api)}`);
+            }
+            if (localStageConfig.cloudfront) {
+                const cf = localStageConfig.cloudfront;
+                targets.push(`serve via CloudFront ${cf.distribution} at /${composeCloudFrontPath(cf, api)}/*`);
+            }
+            logger.verbose(`   - WOULD create deployment, update stage '${stage}'${targets.length ? ', ' + targets.join(' and ') : ''}`);
+            results.push({
+                name: api.name,
+                deployment: 'created',
+                stage: 'created',
+                mapping: localStageConfig.mapping ? 'created' : 'skipped',
+                cloudfront: localStageConfig.cloudfront ? 'ok' : undefined,
+                throttle: 'dry-run',
+                functions: api.functions!.length
+            });
             continue;
         }
         let deploymentAction: 'created' | 'existing' = 'existing';
@@ -652,31 +699,43 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
             stageAction = 'created';
         }
 
-        const path = composeMappingPath(localStageConfig, api);
-        const domain = localStageConfig.mapping.domain;
-        const allMappings = await apigw.listBasePathMappings(domain);
-        const decision = decideMappingAction(allMappings, apiId, stage, path);
-        let mappingAction: 'created' | 'existing' | 'moved' = 'existing';
-        if (decision.action === 'conflict') {
-            throw new Error(
-                `Base path '${path}' on domain ${domain} is already mapped to a different api (restApiId=${decision.conflictApiId}, stage=${decision.conflictStage}). ` +
-                `Refusing to overwrite. Remove the conflicting mapping or rename '${api.name}'s composed path.`
-            );
-        } else if (decision.action === 'existing') {
-            logger.verbose(`   - using existing mapping for ${domain} with path '${path}'`);
-        } else if (decision.action === 'move') {
-            logger.verbose(`   - moving mapping for ${domain}: '${decision.from}' → '${path}'`);
-            await apigw.deleteBasePathMapping(domain, decision.from);
-            await apigw.createCustomDomainMappingV2(domain, apiId, stage, path);
-            mappingAction = 'moved';
-        } else {
-            logger.verbose(`   - create mapping for ${domain} with path '${path}'`);
-            try {
+        // Custom-domain base-path mapping. Skipped when the stage has no `mapping`
+        // (e.g. a CloudFront-only stage); the API stage deploy above still happens.
+        let mappingAction: 'created' | 'existing' | 'moved' | 'skipped' = 'skipped';
+        if (localStageConfig.mapping) {
+            const path = composeMappingPath(localStageConfig, api);
+            const domain = localStageConfig.mapping.domain;
+            const allMappings = await apigw.listBasePathMappings(domain);
+            const decision = decideMappingAction(allMappings, apiId, stage, path);
+            mappingAction = 'existing';
+            if (decision.action === 'conflict') {
+                throw new Error(
+                    `Base path '${path}' on domain ${domain} is already mapped to a different api (restApiId=${decision.conflictApiId}, stage=${decision.conflictStage}). ` +
+                    `Refusing to overwrite. Remove the conflicting mapping or rename '${api.name}'s composed path.`
+                );
+            } else if (decision.action === 'existing') {
+                logger.verbose(`   - using existing mapping for ${domain} with path '${path}'`);
+            } else if (decision.action === 'move') {
+                logger.verbose(`   - moving mapping for ${domain}: '${decision.from}' → '${path}'`);
+                await apigw.deleteBasePathMapping(domain, decision.from);
                 await apigw.createCustomDomainMappingV2(domain, apiId, stage, path);
-                mappingAction = 'created';
-            } catch (e) {
-                logger.verbose(`   x mapping for ${domain} with path '${path}' already exists`);
+                mappingAction = 'moved';
+            } else {
+                logger.verbose(`   - create mapping for ${domain} with path '${path}'`);
+                try {
+                    await apigw.createCustomDomainMappingV2(domain, apiId, stage, path);
+                    mappingAction = 'created';
+                } catch (e) {
+                    logger.verbose(`   x mapping for ${domain} with path '${path}' already exists`);
+                }
             }
+        }
+
+        // CloudFront mapping: read-only drift check. The origin + behavior are owned
+        // by CloudFormation; warn (and print the fragment) if they're missing/drifted.
+        let cloudfrontAction: 'ok' | 'drift' | 'missing' | undefined = undefined;
+        if (localStageConfig.cloudfront) {
+            cloudfrontAction = await checkCloudFrontDrift(stage, localStageConfig.cloudfront, api, region);
         }
 
         // update permissions for functions
@@ -693,11 +752,65 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
             deployment: deploymentAction,
             stage: stageAction,
             mapping: mappingAction,
+            cloudfront: cloudfrontAction,
             throttle: throttleLabel,
             functions: api.functions!.length
         });
     }
+
+    // CloudFront cache invalidation: one invalidation per stage covers every API
+    // under the path prefix (e.g. /api/*). Default on; opt out with invalidate:false.
+    const cf = localStageConfig.cloudfront;
+    if (cf && apis.length > 0) {
+        const invPath = `/${cf.path ?? 'api'}/*`;
+        if (dryRun) {
+            logger.verbose(`   - WOULD invalidate '${invPath}' on distribution '${cf.distribution}'`);
+        } else if (cf.invalidate !== false) {
+            const id = await cloudfront.createInvalidation(cf.distributionValue!, [invPath]);
+            logger.verbose(`   - invalidation '${id}' created on ${cf.distributionValue} for '${invPath}'`);
+        } else {
+            logger.verbose(`   - skipping invalidation for '${invPath}' (invalidate:false)`);
+        }
+    }
+
     return results;
+}
+
+// Read-only CloudFront drift check for a single API on a CloudFront-mapped stage.
+// Never fails the deploy — warns (and prints the CFN fragment to add) when the
+// distribution is missing the expected behavior, or its origin path / cache
+// policy don't match. Mirrors warnIfOriginPathDrift's never-fail philosophy.
+async function checkCloudFrontDrift(stage: string, cf: StageCloudFront, api: ExportConfig, region: string): Promise<'ok' | 'drift' | 'missing'> {
+    const distId = cf.distributionValue!;
+    const pathPattern = `/${composeCloudFrontPath(cf, api)}/*`;
+    const expectedOriginPath = `/${stage}`;
+    try {
+        const behavior = await cloudfront.getCacheBehavior(distId, pathPattern);
+        if (!behavior) {
+            console.warn(`   ! WARNING: CloudFront distribution ${distId} has no cache behavior '${pathPattern}' for api '${api.name}'. Add the following to CloudFormation (or run: cicd cloudfront ${stage}):`);
+            const fragment = buildCloudFrontFragment({
+                stage,
+                apis: [{ name: api.name, apiId: api.value!, region, pathPattern, exportName: api.name }],
+                cachePolicy: cf.cachePolicy,
+                format: 'yaml'
+            });
+            console.warn(fragment);
+            return 'missing';
+        }
+        if (behavior.originPath !== null && behavior.originPath !== expectedOriginPath) {
+            console.warn(`   ! WARNING: CloudFront behavior '${pathPattern}' origin OriginPath is '${behavior.originPath}', expected '${expectedOriginPath}'. Update CloudFormation.`);
+            return 'drift';
+        }
+        if (cf.cachePolicy && behavior.cachePolicyId && behavior.cachePolicyId !== cf.cachePolicy) {
+            console.warn(`   ! WARNING: CloudFront behavior '${pathPattern}' CachePolicyId is '${behavior.cachePolicyId}', expected '${cf.cachePolicy}'.`);
+            return 'drift';
+        }
+        logger.verbose(`   - cloudfront behavior '${pathPattern}' → OriginPath '${behavior.originPath}' OK`);
+        return 'ok';
+    } catch (e: any) {
+        logger.verbose(`   - cloudfront drift check skipped for ${api.name}: ${e.message}`);
+        return 'ok';
+    }
 }
 
 async function processApiGateway(stage: string, appAlias: string, commit: string, apiFilter?: string, dryRun: boolean = false): Promise<APIResult> {
@@ -1443,6 +1556,7 @@ export {
     getConfig,
     getVar,
     composeMappingPath,
+    composeCloudFrontPath,
     decideMappingAction,
     findAliasExact,
     findVersion,

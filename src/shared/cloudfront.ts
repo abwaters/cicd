@@ -41,6 +41,30 @@ async function getOriginPath(distributionId: string, originId: string): Promise<
     return target.OriginPath ?? '';
 }
 
+interface CacheBehaviorInfo {
+    targetOriginId: string;
+    cachePolicyId?: string;
+    originPath: string | null;  // OriginPath of the target origin, null if origin not found
+}
+
+// Read-only: find an ordered cache behavior by exact path pattern and resolve
+// its target origin's OriginPath. Used by the deploy drift-check to confirm a
+// distribution is wired up for a CloudFront-mapped API stage. Returns null when
+// no behavior matches the pattern.
+async function getCacheBehavior(distributionId: string, pathPattern: string): Promise<CacheBehaviorInfo | null> {
+    const { config } = await getDistributionConfig(distributionId);
+    const behaviors = config.CacheBehaviors?.Items ?? [];
+    const behavior = behaviors.find(b => b.PathPattern === pathPattern);
+    if (!behavior || !behavior.TargetOriginId) return null;
+    const origins = config.Origins?.Items ?? [];
+    const origin = origins.find(o => o.Id === behavior.TargetOriginId);
+    return {
+        targetOriginId: behavior.TargetOriginId,
+        cachePolicyId: behavior.CachePolicyId,
+        originPath: origin ? (origin.OriginPath ?? '') : null
+    };
+}
+
 async function createInvalidation(distributionId: string, paths: string[]): Promise<string> {
     const cf = await getClient();
     const resp = await awsRetry(() => cf.send(new CreateInvalidationCommand({
@@ -59,5 +83,6 @@ async function createInvalidation(distributionId: string, paths: string[]): Prom
 export {
     getDistributionConfig,
     getOriginPath,
+    getCacheBehavior,
     createInvalidation
 };

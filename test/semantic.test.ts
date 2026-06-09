@@ -208,6 +208,49 @@ describe('semanticValidation - api mapping path collisions', () => {
     });
 });
 
+describe('semanticValidation - cloudfront path collisions', () => {
+    it('flags two APIs that resolve to the same cloudfront path on a distribution', () => {
+        const errors = semanticValidation(baseConfig({
+            stages: [{
+                stage: 'dev',
+                cloudfront: { distribution: 'dist-export', path: 'api' },
+            } as any],
+            exports: [
+                { type: 'api', name: 'a', prefix: 'auth' },
+                { type: 'api', name: 'b', prefix: 'auth' },
+            ],
+        }));
+        expect(errors).toContain(
+            "Stage 'dev': APIs 'a' and 'b' both resolve to CloudFront path '/api/auth/*' on distribution 'dist-export'"
+        );
+    });
+
+    it('does not flag distinct cloudfront paths', () => {
+        const errors = semanticValidation(baseConfig({
+            stages: [{
+                stage: 'dev',
+                cloudfront: { distribution: 'dist-export' },
+            } as any],
+            exports: [
+                { type: 'api', name: 'a', path: 'orders' },
+                { type: 'api', name: 'b', path: 'customers' },
+            ],
+        }));
+        expect(errors).toHaveLength(0);
+    });
+
+    it('skips stages without a cloudfront mapping', () => {
+        const errors = semanticValidation(baseConfig({
+            stages: [{ stage: 'dev', mapping: { domain: 'd', path: '' } } as any],
+            exports: [
+                { type: 'api', name: 'a', path: 'orders' },
+                { type: 'api', name: 'b', path: 'customers' },
+            ],
+        }));
+        expect(errors).toHaveLength(0);
+    });
+});
+
 describe('semanticValidation - clean config', () => {
     it('returns no errors for a fully valid minimal config', () => {
         const errors = semanticValidation(baseConfig());

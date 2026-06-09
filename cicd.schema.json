@@ -323,6 +323,34 @@
             },
             "additionalProperties": false
           },
+          "cloudfront": {
+            "type": "object",
+            "description": "Serve this stage's API Gateway REST APIs through an existing CloudFront distribution at a path prefix (e.g. /api), instead of (or alongside) a custom domain. The distribution's API origin and cache behavior are owned by CloudFormation; cicd only validates (drift-check) and invalidates. Run `cicd cloudfront <stage>` to generate the required CloudFormation.",
+            "required": ["distribution"],
+            "properties": {
+              "distribution": {
+                "type": "string",
+                "description": "CloudFormation export name resolving to the CloudFront distribution ID for this stage",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "description": "Path-prefix segment APIs are served under (e.g. 'api' → /api/*). Defaults to 'api'.",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._~!$&'()*+,;=:@-]+(/[A-Za-z0-9._~!$&'()*+,;=:@-]+)*$"
+              },
+              "invalidate": {
+                "type": "boolean",
+                "description": "Invalidate the mapped path on the distribution after deploy (default true)"
+              },
+              "cachePolicy": {
+                "type": "string",
+                "description": "Optional expected CloudFront cache policy id/name, validated by the drift-check only (cicd never sets it)",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          },
           "environment": {
             "type": "object",
             "description": "Stage-specific environment variable overrides. Supports !ImportValue, !ParameterStore, and !SetEnv prefixes",
