@@ -6,6 +6,19 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    # Batch related bumps into fewer PRs to reduce noise. Security updates
+    # (when "Dependabot security updates" is enabled in repo settings) are
+    # also grouped where possible.
+    groups:
+      aws-sdk:
+        patterns:
+          - "@aws-sdk/*"
+      dev-dependencies:
+        dependency-type: "development"
+      production-dependencies:
+        dependency-type: "production"
+        exclude-patterns:
+          - "@aws-sdk/*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -13,3 +26,7 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"

@@ -1,0 +1,28 @@
+name: Dependency Review
+
+# Scans dependency manifest changes on PRs and blocks merges that introduce
+# dependencies with known vulnerabilities or disallowed licenses.
+# Free for public repositories.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write # allow the action to comment a summary on the PR
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
