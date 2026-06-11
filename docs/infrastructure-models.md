@@ -107,6 +107,8 @@ www.domain.com/api/*      → CloudFront origin 2: API Gateway
 
 One domain serves both the static site and the API — no CORS between them, one certificate, one DNS record. The division of labor holds here too: **CloudFormation owns the distribution** (its origins and behaviors are infrastructure), while this tool deploys the API Gateway stage behind it.
 
+This sub-model has first-class tool support via `stages[].cloudfront`. A stage declares the distribution and a path prefix (default `api`), and each deploy then verifies the wiring with a **read-only drift check** — warning, never failing, if the distribution's behavior or origin doesn't match — and **invalidates** `/{path}/*` so the release is visible through the CDN. The one-time infrastructure setup is generated for you: `cicd cloudfront <stage>` prints the ready-to-paste CloudFormation origin + cache behavior fragment. The line never moves, though — the tool generates and verifies the distribution's configuration, but only CloudFormation ever applies it.
+
 #### 3. Fargate compute
 
 When sustained volume makes per-invocation pricing the expensive option, the compute swaps from Lambda to an always-on container — same API concept, different engine. Setting `"computeMode": "fargate"` in `cicd.json` switches the deployment model:
