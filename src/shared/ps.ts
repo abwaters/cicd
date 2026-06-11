@@ -36,7 +36,7 @@ async function getParameterValue(parameterName: string, withDecryption: boolean)
         if (error?.name === 'ParameterNotFound' || error?.__type === 'ParameterNotFound') {
             return null;
         }
-        throw new Error(`Parameter Store lookup failed for '${parameterName}': ${error?.message || error}`);
+        throw new Error(`Parameter Store lookup failed for '${parameterName}': ${error?.message || error}`, { cause: error });
     }
 }
 

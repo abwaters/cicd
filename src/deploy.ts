@@ -296,7 +296,7 @@ async function run(): Promise<void> {
     } catch (err: any) {
         markDeploymentFailure(err.message || 'Deployment failed');
         if (isNetworkError(err)) {
-            throw new Error(describeNetworkError(err));
+            throw new Error(describeNetworkError(err), { cause: err });
         }
         throw err;
     }

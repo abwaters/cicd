@@ -63,7 +63,7 @@ export async function runPlugins(
             const r = await handler.call(plugin, ctx);
             if (r) results.push(r);
         } catch (e: any) {
-            throw new Error(`[plugin:${plugin.name}] ${e.message || e}`);
+            throw new Error(`[plugin:${plugin.name}] ${e.message || e}`, { cause: e });
         }
     }
     return results;
@@ -79,7 +79,7 @@ export async function runInfoPlugins(stages: ReadonlyArray<StageConfig>): Promis
             const r = await plugin.info.call(plugin, ctx);
             if (r) results.push(r);
         } catch (e: any) {
-            throw new Error(`[plugin:${plugin.name}] ${e.message || e}`);
+            throw new Error(`[plugin:${plugin.name}] ${e.message || e}`, { cause: e });
         }
     }
     return results;

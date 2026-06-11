@@ -14,7 +14,7 @@ describe('initEnvironmentVars Guard Check', () => {
             return;
         }
 
-        const envConfig = Object.keys(env);
+        const _envConfig = Object.keys(env);
         fail('Should not reach this point with undefined env');
     });
 
@@ -26,7 +26,7 @@ describe('initEnvironmentVars Guard Check', () => {
             return;
         }
 
-        const envConfig = Object.keys(env);
+        const _envConfig = Object.keys(env);
         fail('Should not reach this point with null env');
     });
 
