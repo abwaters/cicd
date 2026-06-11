@@ -6,7 +6,10 @@
 
 Custom AWS CI/CD deployment tool for managing Lambda functions, API Gateway, and SNS resources.
 
-New here? Read [Infrastructure Models](docs/infrastructure-models.md) for the concepts behind the tool — the API and WWW deployment models, the Lambda → Fargate scale-out path, and the opinions that shape them. Then follow the [QUICKSTART](QUICKSTART.md) to get a deployment running.
+New here? Start with the concept docs, then follow the [QUICKSTART](QUICKSTART.md) to get a deployment running:
+
+- [Infrastructure Models](docs/infrastructure-models.md) — the API and WWW deployment models, the Lambda → Fargate scale-out path, and the opinions that shape them
+- [Versioning: Semver vs Commit](docs/versioning.md) — why deployments are keyed by git commit while the tool itself is semver'd, and where each scheme belongs
 
 ## Installation
 
