@@ -1,6 +1,6 @@
 # Versioning: Semver vs Commit
 
-A companion to [Infrastructure Models](infrastructure-models.md). That document explains *what* this tool deploys; this one explains why everything it deploys is versioned by **git commit** rather than by **semantic version** — and why that isn't a rejection of semver, but a recognition that semver answers a different question.
+A companion to [Infrastructure Models](infrastructure-models.md). That document explains *what* this tool deploys; this one explains why everything it deploys is versioned by **git commit** rather than by **semantic version** — and why that isn't a rejection of semver, but a recognition that semver answers a different question, and answers it with humans in the loop.
 
 ## Two different questions
 
@@ -10,19 +10,31 @@ Every versioning scheme exists to answer a question. The two schemes answer diff
 
 - **A commit answers: "exactly what is running, and can I get back to what ran before?"** It versions a *state*. The hash is the identity of a precise source tree — automatic, unique, immutable, and traceable to everything that produced it.
 
-Confusing the two is how teams end up with version-bump ceremony on services nobody consumes by range, or with production incidents where nobody can say which code is actually live. The opinion of this tool: **semver is for what's consumed; commits are for what's deployed.**
+The deeper difference: one is interpretive and one is deterministic. A semver is a *judgment* someone made about a change. A commit is a *fact* about it. The opinion of this tool, in one line: **semver is for what's consumed; commits are for what's deployed.**
 
 ## What semver is good at
 
-Semver is the right scheme for artifacts consumed as *dependencies* — libraries, packages, CLI tools — where many consumers, on their own schedules, resolve your artifact through version ranges (`^2.3.0`) and need a machine-readable signal about compatibility. The version number carries intent: a major bump warns of breakage, a patch promises safety. That signal is the whole point, and nothing about a commit hash provides it.
+Semver is deeply meaningful, and it's the right scheme for artifacts consumed as *dependencies* — libraries, packages, CLI tools — where many consumers, on their own schedules, resolve your artifact through version ranges (`^2.3.0`) and need a machine-readable signal about compatibility. It helps tremendously in dependency management. A major bump warns of breakage; a patch promises safety.
+
+But be precise about what that signal is: **it tells you the intent of the author. It does not guarantee it.** A patch release can break you; a major bump can be a no-op for your usage. Semver communicates a promise; the hash is the only thing that identifies what you actually got.
 
 This repo practices what it preaches: the `cicd` tool itself is published to npm via semantic-release, with versions derived automatically from conventional commit messages. It's consumed as a dependency, so it gets a semver.
 
-## Why deployments are different
+## The human surface
 
-A deployed application is not consumed by version range. An environment — dev, staging, prod — runs exactly one version at a time, and nobody `npm install`s your production API. The questions that matter are operational: what is live, what was live before, how do I get back. Commits answer those questions better than semver can, for several reinforcing reasons.
+Semver's semantics require human oversight. Someone has to decide that a change is a *chore* or a *fix* or a *feature*; someone has to judge whether it's breaking. Semantic-release systems automate the bump arithmetic cleverly — but the judgment doesn't disappear, it moves upstream into commit classification, performed by every contributor, on every commit, forever.
 
-**Identity, not intent.** A commit hash requires no human judgment. There is no "what do we bump?" debate, no version-bump commit, no race between two branches claiming the same number, no tag that someone forgot to push. Every commit is *already* a complete, unambiguous release identifier the moment it exists.
+In tightly controlled domains, this works well. At scale, it starts to fall apart. The more engineers — the more participants of any kind — the more ways the model breaks: people come at a problem from different perspectives, operate in different mental states, work under different levels of pressure. Any sufficiently complicated surface has holes, and no tool or convention can be built to cover all the ways real people will come at it.
+
+This is a tough concept for engineers to grasp, because the fix looks easy: *don't do the things that cause it to break.* That instinct is exactly the tell. A release model that depends on every participant classifying every change correctly, consistently, under pressure, is not a model — it's a hope. The real world doesn't grade on intentions.
+
+## Keep the high-pressure path reductive
+
+Deployment is the high-pressure, high-cost segment of the pipeline. When it runs, it changes production; when it matters most — the rollback during an incident — the people running it are at their most stressed and least careful. The design principle that follows: **keep that segment as simple and as reductive as possible.**
+
+The commit hash is the reductive choice. It has no room for interpretation. It can't be missed the way a manual tag can. You can't argue over it the way you can argue over a patch-versus-minor increment. It requires no decision, no ceremony, no coordination — it exists, complete and unambiguous, the moment the code does. Releases keyed on it are **fully deterministic**: the same input always names the same artifact, no matter who runs the pipeline or what kind of day they're having.
+
+Everything in the deployment machinery follows from that choice:
 
 **Promotion, not publication.** A release moves through stages: deployed to dev, promoted to staging, promoted to prod. It's the *same artifact* at every step, and its identity must not change as it moves. Commit-keyed artifacts promote without renaming. Semver fits awkwardly here — either every promotion mints a new version (so the "same" release has three names), or the version stays fixed and tells you nothing about which build of it you're running.
 
@@ -60,4 +72,4 @@ The two schemes are not rivals; they version different things, and a single repo
 
 Conventional commits are the bridge between the worlds: the same commit message that tells semantic-release *what to bump* tells the deployment ledger *what shipped*. Write the message once; both versioning schemes get their meaning from it.
 
-The rule of thumb, restated: **if something is consumed by others as a dependency, give it a semver. If something is deployed into an environment, key it by commit.** When humans need a memorable name for a milestone, tag it — tags and hashes coexist happily. But the deployment machinery keys on the hash, because the hash is the one identifier that can never disagree with reality.
+So if you choose semver because you like the elegance of it — do. It earns its keep in dependency management, and it tells your consumers what you *meant* by a release. Just keep it out of the high-pressure path. Deployments key on the commit, because the hash is the one identifier with no room for interpretation — the only one that can never disagree with reality.
