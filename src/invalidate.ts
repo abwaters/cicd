@@ -56,7 +56,4 @@ async function main(): Promise<void> {
     console.timeEnd('invalidate');
 }
 
-main().catch(err => {
-    console.error(`\nInvalidation failed: ${err.message || err}`);
-    process.exit(1);
-});
+export { main as run };

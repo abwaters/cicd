@@ -287,14 +287,19 @@ async function main(): Promise<void> {
     console.timeEnd("deploy");
 }
 
-main().catch(err => {
-    // Safety net: if an error escaped every inner try/catch, still mark the
-    // GitHub deployment failed so it doesn't sit at `in_progress` forever.
-    markDeploymentFailure(err.message || 'Deployment failed');
-    if (isNetworkError(err)) {
-        console.error(`\nDeployment failed: ${describeNetworkError(err)}`);
-    } else {
-        console.error(`\nDeployment failed: ${err.message || err}`);
+// Entry point used by index.ts. Safety net: if an error escaped every inner
+// try/catch, still mark the GitHub deployment failed so it doesn't sit at
+// `in_progress` forever, then rethrow for index.ts to report.
+async function run(): Promise<void> {
+    try {
+        await main();
+    } catch (err: any) {
+        markDeploymentFailure(err.message || 'Deployment failed');
+        if (isNetworkError(err)) {
+            throw new Error(describeNetworkError(err));
+        }
+        throw err;
     }
-    process.exit(1);
-});
+}
+
+export { run };
