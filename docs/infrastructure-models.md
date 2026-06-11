@@ -42,7 +42,7 @@ Git commits version everything, uniformly:
 | S3 web build prefix | `{stage}/{commit}/` |
 | ECS task definition | revision pinned to the commit's image tag |
 
-Because every release artifact is keyed by commit and prior artifacts are retained, **deploy and rollback are the same operation pointed at different commits**.
+Because every release artifact is keyed by commit and prior artifacts are retained, **deploy and rollback are the same operation pointed at different commits**. The full argument for commit-keyed releases — and why semver belongs elsewhere — is in [Versioning: Semver vs Commit](versioning.md).
 
 ### The economic thesis: cost follows usage, starting at ~zero
 
