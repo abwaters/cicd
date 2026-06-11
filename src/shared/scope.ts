@@ -14,6 +14,17 @@ export interface DeployScope {
     enabledPluginNames: string[];
 }
 
+// Option names consumed by resolveScope — the static scope flags plus each
+// loaded plugin's scope flag (e.g. --no-twilio). Used by deploy/rollback to
+// validate their CLI flags.
+export function scopeOptionNames(plugins: CICDPlugin[] = []): string[] {
+    return [
+        'env', 'api', 'sns', 'sqs', 'workers', 'web',
+        'apiFilter', 'webFilter',
+        ...plugins.map(p => pluginScopeFlag(p)),
+    ];
+}
+
 export function resolveScope(o: CLIOptions, plugins: CICDPlugin[] = []): DeployScope {
     let processEnv = false;
     let processApi = true;

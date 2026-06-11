@@ -18,6 +18,7 @@ async function main(): Promise<void> {
 
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
+    options.enforceKnownOptions(o, 'cloudfront', ['apiFilter', 'json']);
     args = options.stripOptions(args);
 
     if (o.verbose) {

@@ -1,4 +1,4 @@
-import { resolveScope, scopeLabel, deployTargetLabel } from '../src/shared/scope';
+import { resolveScope, scopeLabel, deployTargetLabel, scopeOptionNames } from '../src/shared/scope';
 import { CICDPlugin } from '../src/shared/plugin';
 
 const twilioPlugin: CICDPlugin = { name: 'twilio', scopeFlag: 'noTwilio' };
@@ -178,5 +178,19 @@ describe('deployTargetLabel', () => {
     it('preserves canonical order api+sns+sqs+workers+web', () => {
         const label = deployTargetLabel(resolveScope({}), { computeMode: 'lambda', exportTypes: ['web', 'sqs', 'sns', 'api'], hasWorkers: true });
         expect(label).toBe('api+sns+sqs+workers+web');
+    });
+});
+
+describe('scopeOptionNames', () => {
+    it('returns the static scope flags with no plugins', () => {
+        expect(scopeOptionNames()).toEqual([
+            'env', 'api', 'sns', 'sqs', 'workers', 'web', 'apiFilter', 'webFilter',
+        ]);
+    });
+
+    it('includes each plugin scope flag', () => {
+        const names = scopeOptionNames([twilioPlugin, slackPlugin]);
+        expect(names).toContain('noTwilio');
+        expect(names).toContain('noSlack');
     });
 });

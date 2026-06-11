@@ -1,6 +1,6 @@
 import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
-import { resolveScope, scopeLabel, deployTargetLabel } from './shared/scope';
+import { resolveScope, scopeLabel, deployTargetLabel, scopeOptionNames } from './shared/scope';
 import { loadPlugins } from './shared/plugins';
 import { runPlugins } from './shared/plugin-runner';
 import { PluginResult } from './shared/plugin';
@@ -127,6 +127,10 @@ async function main(): Promise<void> {
 
     // Determine scope
     const plugins = await loadPlugins();
+    options.enforceKnownOptions(o, 'rollback', [
+        ...scopeOptionNames(plugins),
+        'dryRun', 'keep', 'description',
+    ]);
     const scope = resolveScope(o, plugins);
     const { processEnv, processApi, processSns, processSqs, processWorkers, processWeb, apiFilter, webFilter, disabledPlugins } = scope;
     const dryRun = !!o.dryRun;
