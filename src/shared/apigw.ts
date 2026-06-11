@@ -46,163 +46,144 @@ async function getClientV2(): Promise<ApiGatewayV2Client> {
     return clientv2;
 }
 
-async function createDeployment(apiId: string, commit: string): Promise<DeploymentInfo | null> {
-    try {
-        const command = new CreateDeploymentCommand({
-            restApiId: apiId,
-            description: commit
-        });
-        const apiClient = await getClient();
-        const response = await awsRetry(() => apiClient.send(command));
-        return {id: response.id!, description: response.description};
-    } catch (error) {
-        console.error("Error creating API Gateway deployment:", error);
-    }
-    return null;
+async function createDeployment(apiId: string, commit: string): Promise<DeploymentInfo> {
+    const command = new CreateDeploymentCommand({
+        restApiId: apiId,
+        description: commit
+    });
+    const apiClient = await getClient();
+    const response = await awsRetry(() => apiClient.send(command));
+    return {id: response.id!, description: response.description};
 }
 
 async function createStage(apiId: string, stageName: string, deploymentId: string, commit: string, throttleSettings: ThrottleSettings | null): Promise<void> {
     const app = await config.getConfig('app');
-    try {
-        const commandParams: any = {
-            restApiId: apiId,
-            stageName: stageName,
-            deploymentId: deploymentId,
-            description: commit,
-            variables: {"Commit": commit},
-            tags: {
-                Customer: app,
-                Name: app,
-                Commit: commit
-            }
-        };
-
-        // Add throttle settings if provided
-        if (throttleSettings && (throttleSettings.rateLimit !== undefined || throttleSettings.burstLimit !== undefined)) {
-            commandParams.throttleSettings = {
-                rateLimit: throttleSettings.rateLimit,
-                burstLimit: throttleSettings.burstLimit
-            };
+    const commandParams: any = {
+        restApiId: apiId,
+        stageName: stageName,
+        deploymentId: deploymentId,
+        description: commit,
+        variables: {"Commit": commit},
+        tags: {
+            Customer: app,
+            Name: app,
+            Commit: commit
         }
+    };
 
-        const command = new CreateStageCommand(commandParams);
-        const apiClient = await getClient();
-        await awsRetry(() => apiClient.send(command));
-    } catch (error) {
-        console.error("Error creating API Gateway stage:", error);
+    // Add throttle settings if provided
+    if (throttleSettings && (throttleSettings.rateLimit !== undefined || throttleSettings.burstLimit !== undefined)) {
+        commandParams.throttleSettings = {
+            rateLimit: throttleSettings.rateLimit,
+            burstLimit: throttleSettings.burstLimit
+        };
     }
+
+    const command = new CreateStageCommand(commandParams);
+    const apiClient = await getClient();
+    await awsRetry(() => apiClient.send(command));
 }
 
 async function createCustomDomainMapping(domainName: string, restApiId: string, stage: string, basePath: string): Promise<void> {
-    try {
-        const command = new CreateBasePathMappingCommand({
-            domainName: domainName,
-            restApiId: restApiId,
-            stage: stage,
-            basePath: basePath
-        });
-        const apiClient = await getClient();
-        await awsRetry(() => apiClient.send(command));
-    } catch (error) {
-        console.error("Error creating base path mapping with basePath:", error);
-    }
+    const command = new CreateBasePathMappingCommand({
+        domainName: domainName,
+        restApiId: restApiId,
+        stage: stage,
+        basePath: basePath
+    });
+    const apiClient = await getClient();
+    await awsRetry(() => apiClient.send(command));
 }
 
 async function listDeployments(restApiId: string): Promise<Deployment[]> {
-    try {
-        const command = new GetDeploymentsCommand({
-            restApiId: restApiId
+    const apiClient = await getClient();
+    const deployments: Deployment[] = [];
+    let position: string | undefined = undefined;
+    do {
+        const command: GetDeploymentsCommand = new GetDeploymentsCommand({
+            restApiId: restApiId,
+            position: position
         });
-
-        const apiClient = await getClient();
         const response = await awsRetry(() => apiClient.send(command));
-        return response.items || [];
-    } catch (error) {
-        console.error("Error listing API deployments:", error);
-        return [];
-    }
+        deployments.push(...(response.items || []));
+        position = response.position;
+    } while (position);
+    return deployments;
 }
 
 async function listStages(restApiId: string): Promise<Stage[]> {
-    try {
-        const command = new GetStagesCommand({
-            restApiId: restApiId
-        });
-        const apiClient = await getClient();
-        const response = await awsRetry(() => apiClient.send(command));
-        return response.item || [];
-    } catch (error) {
-        console.error("Error listing API stages:", error);
-        return [];
-    }
+    // GetStages is not paginated: it always returns the full set of stages.
+    const command = new GetStagesCommand({
+        restApiId: restApiId
+    });
+    const apiClient = await getClient();
+    const response = await awsRetry(() => apiClient.send(command));
+    return response.item || [];
 }
 
 async function updateStage(restApiId: string, stageName: string, deploymentId: string, commit: string, throttleSettings: ThrottleSettings | null): Promise<void> {
     const app = await config.getConfig('app');
     const region = await awsContext.getRegion();
-    try {
-        const patchOperations: PatchOperation[] = [
-            {
-                op: "replace",
-                path: "/deploymentId",
-                value: deploymentId
-            },
-            {
-                op: "replace",
-                path: "/description",
-                value: commit
-            },
-            {
-                op: "replace",
-                path: "/variables/Commit",
-                value: commit
-            }
-        ];
-
-        // Add throttle patch operations if provided
-        if (throttleSettings) {
-            if (throttleSettings.rateLimit !== undefined) {
-                patchOperations.push({
-                    op: "replace",
-                    path: "/*/*/throttling/rateLimit",
-                    value: String(throttleSettings.rateLimit)
-                });
-            }
-            if (throttleSettings.burstLimit !== undefined) {
-                patchOperations.push({
-                    op: "replace",
-                    path: "/*/*/throttling/burstLimit",
-                    value: String(throttleSettings.burstLimit)
-                });
-            }
+    const patchOperations: PatchOperation[] = [
+        {
+            op: "replace",
+            path: "/deploymentId",
+            value: deploymentId
+        },
+        {
+            op: "replace",
+            path: "/description",
+            value: commit
+        },
+        {
+            op: "replace",
+            path: "/variables/Commit",
+            value: commit
         }
+    ];
 
-        const command = new UpdateStageCommand({
-            restApiId: restApiId,
-            stageName: stageName,
-            patchOperations: patchOperations
-        });
-
-        const apiClient = await getClient();
-        await awsRetry(() => apiClient.send(command));
-
-        // Update tags on existing stage
-        try {
-            const stageArn = `arn:aws:apigateway:${region}::/restapis/${restApiId}/stages/${stageName}`;
-            const tagCommand = new TagResourceCommand({
-                resourceArn: stageArn,
-                tags: {
-                    Customer: app,
-                    Name: app,
-                    Commit: commit
-                }
+    // Add throttle patch operations if provided
+    if (throttleSettings) {
+        if (throttleSettings.rateLimit !== undefined) {
+            patchOperations.push({
+                op: "replace",
+                path: "/*/*/throttling/rateLimit",
+                value: String(throttleSettings.rateLimit)
             });
-            await awsRetry(() => apiClient.send(tagCommand));
-        } catch (tagError) {
-            console.error("Error tagging stage:", tagError);
         }
-    } catch (error) {
-        console.error("Error updating stage deployment:", error);
+        if (throttleSettings.burstLimit !== undefined) {
+            patchOperations.push({
+                op: "replace",
+                path: "/*/*/throttling/burstLimit",
+                value: String(throttleSettings.burstLimit)
+            });
+        }
+    }
+
+    const command = new UpdateStageCommand({
+        restApiId: restApiId,
+        stageName: stageName,
+        patchOperations: patchOperations
+    });
+
+    const apiClient = await getClient();
+    await awsRetry(() => apiClient.send(command));
+
+    // Update tags on existing stage; tags are informational, so a tagging
+    // failure should not fail the deployment of the stage itself.
+    try {
+        const stageArn = `arn:aws:apigateway:${region}::/restapis/${restApiId}/stages/${stageName}`;
+        const tagCommand = new TagResourceCommand({
+            resourceArn: stageArn,
+            tags: {
+                Customer: app,
+                Name: app,
+                Commit: commit
+            }
+        });
+        await awsRetry(() => apiClient.send(tagCommand));
+    } catch (tagError) {
+        console.error("Error tagging stage:", tagError);
     }
 }
 
@@ -221,47 +202,46 @@ async function deleteBasePathMapping(domainName: string, basePath: string): Prom
 }
 
 async function listBasePathMappings(domainName: string): Promise<BasePathMapping[]> {
-    try {
-        const command = new GetBasePathMappingsCommand({
-            domainName: domainName
+    const apiClient = await getClient();
+    const mappings: BasePathMapping[] = [];
+    let position: string | undefined = undefined;
+    do {
+        const command: GetBasePathMappingsCommand = new GetBasePathMappingsCommand({
+            domainName: domainName,
+            position: position
         });
-
-        const apiClient = await getClient();
         const response = await awsRetry(() => apiClient.send(command));
-        return response.items || [];
-    } catch (error) {
-        console.error(`Error listing base path mappings for domain ${domainName}:`, error);
-        return [];
-    }
+        mappings.push(...(response.items || []));
+        position = response.position;
+    } while (position);
+    return mappings;
 }
 
 async function createCustomDomainMappingV2(domainName: string, apiId: string, stage: string, basePath: string): Promise<void> {
-    try {
-        const command = new CreateApiMappingCommand({
-            DomainName: domainName,
-            ApiId: apiId,
-            Stage: stage,
-            ApiMappingKey: basePath
-        });
-        const apiClientV2 = await getClientV2();
-        await awsRetry(() => apiClientV2.send(command));
-    } catch (error) {
-        console.error("Error creating custom domain mapping V2:", error);
-    }
+    const command = new CreateApiMappingCommand({
+        DomainName: domainName,
+        ApiId: apiId,
+        Stage: stage,
+        ApiMappingKey: basePath
+    });
+    const apiClientV2 = await getClientV2();
+    await awsRetry(() => apiClientV2.send(command));
 }
 
 async function listApiMappingsV2(domainName: string): Promise<ApiMapping[]> {
-    try {
-        const command = new GetApiMappingsCommand({
-            DomainName: domainName
+    const apiClientV2 = await getClientV2();
+    const mappings: ApiMapping[] = [];
+    let nextToken: string | undefined = undefined;
+    do {
+        const command: GetApiMappingsCommand = new GetApiMappingsCommand({
+            DomainName: domainName,
+            NextToken: nextToken
         });
-        const apiClientV2 = await getClientV2();
         const response = await awsRetry(() => apiClientV2.send(command));
-        return response.Items || [];
-    } catch (error) {
-        console.error(`Error listing API mappings for domain ${domainName}:`, error);
-        return [];
-    }
+        mappings.push(...(response.Items || []));
+        nextToken = response.NextToken;
+    } while (nextToken);
+    return mappings;
 }
 
 async function deleteDeployment(apiId: string, deploymentId: string): Promise<void> {

@@ -212,21 +212,21 @@ async function initExports(): Promise<void> {
         let cnt = 0;
         for(const cfg of exportMap.values()) {
             if( !cfg.hasOwnProperty('value') ) {
-                console.log(`ERROR: could not find export for '${cfg.name}'.`);
+                logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
         }
 
         for(const cfg of functionMap.values()) {
             if( !cfg.hasOwnProperty('value') ) {
-                console.log(`ERROR: could not find export for '${cfg.name}'.`);
+                logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
         }
 
         for(const cfg of workerMap.values()) {
             if( !cfg.hasOwnProperty('value') ) {
-                console.log(`ERROR: could not find export for '${cfg.name}'.`);
+                logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
         }
@@ -266,7 +266,7 @@ async function initExports(): Promise<void> {
             if (rawExports.has(cfg.distribution)) {
                 cfg.distributionValue = rawExports.get(cfg.distribution);
             } else {
-                console.log(`ERROR: could not find export for web distribution '${cfg.distribution}'.`);
+                logger.error(`ERROR: could not find export for web distribution '${cfg.distribution}'.`);
                 webMissing++;
             }
         }
@@ -284,7 +284,7 @@ async function initExports(): Promise<void> {
             if (rawExports.has(sc.cloudfront.distribution)) {
                 sc.cloudfront.distributionValue = rawExports.get(sc.cloudfront.distribution);
             } else {
-                console.log(`ERROR: could not find export for stage '${sc.stage}' cloudfront distribution '${sc.cloudfront.distribution}'.`);
+                logger.error(`ERROR: could not find export for stage '${sc.stage}' cloudfront distribution '${sc.cloudfront.distribution}'.`);
                 stageCfMissing++;
             }
         }
@@ -725,7 +725,10 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
                 try {
                     await apigw.createCustomDomainMappingV2(domain, apiId, stage, path);
                     mappingAction = 'created';
-                } catch (e) {
+                } catch (e: any) {
+                    // Only a conflict means the mapping already exists; anything else
+                    // (bad domain, permissions, ...) must fail the deploy.
+                    if (e?.name !== 'ConflictException') throw e;
                     logger.verbose(`   x mapping for ${domain} with path '${path}' already exists`);
                 }
             }
@@ -787,28 +790,28 @@ async function checkCloudFrontDrift(stage: string, cf: StageCloudFront, api: Exp
     try {
         const behavior = await cloudfront.getCacheBehavior(distId, pathPattern);
         if (!behavior) {
-            console.warn(`   ! WARNING: CloudFront distribution ${distId} has no cache behavior '${pathPattern}' for api '${api.name}'. Add the following to CloudFormation (or run: cicd cloudfront ${stage}):`);
+            logger.warn(`   ! WARNING: CloudFront distribution ${distId} has no cache behavior '${pathPattern}' for api '${api.name}'. Add the following to CloudFormation (or run: cicd cloudfront ${stage}):`);
             const fragment = buildCloudFrontFragment({
                 stage,
                 apis: [{ name: api.name, apiId: api.value!, region, pathPattern, exportName: api.name }],
                 cachePolicy: cf.cachePolicy,
                 format: 'yaml'
             });
-            console.warn(fragment);
+            logger.warn(fragment);
             return 'missing';
         }
         if (behavior.originPath !== null && behavior.originPath !== expectedOriginPath) {
-            console.warn(`   ! WARNING: CloudFront behavior '${pathPattern}' origin OriginPath is '${behavior.originPath}', expected '${expectedOriginPath}'. Update CloudFormation.`);
+            logger.warn(`   ! WARNING: CloudFront behavior '${pathPattern}' origin OriginPath is '${behavior.originPath}', expected '${expectedOriginPath}'. Update CloudFormation.`);
             return 'drift';
         }
         if (cf.cachePolicy && behavior.cachePolicyId && behavior.cachePolicyId !== cf.cachePolicy) {
-            console.warn(`   ! WARNING: CloudFront behavior '${pathPattern}' CachePolicyId is '${behavior.cachePolicyId}', expected '${cf.cachePolicy}'.`);
+            logger.warn(`   ! WARNING: CloudFront behavior '${pathPattern}' CachePolicyId is '${behavior.cachePolicyId}', expected '${cf.cachePolicy}'.`);
             return 'drift';
         }
         logger.verbose(`   - cloudfront behavior '${pathPattern}' → OriginPath '${behavior.originPath}' OK`);
         return 'ok';
     } catch (e: any) {
-        logger.verbose(`   - cloudfront drift check skipped for ${api.name}: ${e.message}`);
+        logger.warn(`   ! WARNING: cloudfront drift check skipped for ${api.name}: ${e.message}`);
         return 'ok';
     }
 }
@@ -1010,10 +1013,10 @@ async function warnIfOriginPathDrift(distribution: string, stage: string, expect
     try {
         const op = await cloudfront.getOriginPath(distribution, stage);
         if (op !== null && op !== expected) {
-            console.warn(`   ! WARNING: CloudFront origin '${stage}' OriginPath is '${op}', expected '${expected}'. Update CloudFormation to point this origin at '${expected}'.`);
+            logger.warn(`   ! WARNING: CloudFront origin '${stage}' OriginPath is '${op}', expected '${expected}'. Update CloudFormation to point this origin at '${expected}'.`);
         }
     } catch (e: any) {
-        logger.verbose(`   - origin-path check skipped for ${stage}: ${e.message}`);
+        logger.warn(`   ! WARNING: origin-path drift check skipped for ${stage}: ${e.message}`);
     }
 }
 
@@ -1100,7 +1103,7 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
     // silent empty result would otherwise be reported as a successful deploy.
     if (exports.length === 0) {
         const scoped = all.map(c => `${c.name} → [${(c.stages || ['*']).join(', ')}]`).join('; ');
-        console.warn(`   ! WARNING: no web export applies to stage '${stage}' — nothing was uploaded. Configured web exports: ${scoped}`);
+        logger.warn(`   ! WARNING: no web export applies to stage '${stage}' — nothing was uploaded. Configured web exports: ${scoped}`);
     }
 
     return { exports };
@@ -1358,7 +1361,8 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
                 await apigw.createCustomDomainMappingV2(domain, httpApi!, '$default', path);
                 logger.verbose(`   - mapping created`);
             } catch (e: any) {
-                logger.verbose(`   x mapping creation failed: ${e.message}`);
+                if (e?.name !== 'ConflictException') throw e;
+                logger.verbose(`   x mapping for ${domain} with path '${path}' already exists`);
             }
         }
     }
