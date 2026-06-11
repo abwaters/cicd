@@ -45,4 +45,29 @@ function stripOptions(args: string[]): string[] {
     return args.filter(arg=>!arg.startsWith('--') && !SHORT_FLAGS[arg]);
 }
 
-export { getOptions, stripOptions };
+// Options accepted by every command.
+const GLOBAL_OPTIONS = ['verbose', 'noHeader'];
+
+function kebabCaseOption(opt: string): string {
+    return opt.replace(/[A-Z]/g, c => '-' + c.toLowerCase());
+}
+
+// Returns the parsed option keys that are not recognized by the command.
+function unknownOptions(o: CLIOptions, allowed: string[]): string[] {
+    const known = new Set([...GLOBAL_OPTIONS, ...allowed]);
+    return Object.keys(o).filter(key => !known.has(key));
+}
+
+// Rejects mistyped flags (e.g. --api-filer=x) that would otherwise be
+// silently ignored. Exits with an error listing the unrecognized flags.
+function enforceKnownOptions(o: CLIOptions, command: string, allowed: string[] = []): void {
+    const unknown = unknownOptions(o, allowed);
+    if (unknown.length > 0) {
+        const flags = unknown.map(k => `--${kebabCaseOption(k)}`).join(', ');
+        console.error(`Unknown option${unknown.length > 1 ? 's' : ''} for '${command}': ${flags}`);
+        console.error(`Run 'cicd help' for usage.`);
+        process.exit(1);
+    }
+}
+
+export { getOptions, stripOptions, unknownOptions, enforceKnownOptions };

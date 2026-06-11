@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
-import { resolveScope, deployTargetLabel } from './shared/scope';
+import { resolveScope, deployTargetLabel, scopeOptionNames } from './shared/scope';
 import { loadPlugins } from './shared/plugins';
 import { runPlugins } from './shared/plugin-runner';
 import { PluginResult } from './shared/plugin';
@@ -59,6 +59,10 @@ async function main(): Promise<void> {
     }
 
     const plugins = await loadPlugins();
+    options.enforceKnownOptions(o, 'deploy', [
+        ...scopeOptionNames(plugins),
+        'dryRun', 'force', 'description', 'transient', 'noTransient',
+    ]);
     const scope = resolveScope(o, plugins);
     const { processEnv, processApi, processSns, processSqs, processWorkers, processWeb, apiFilter, webFilter, disabledPlugins } = scope;
     const dryRun = !!o.dryRun;
