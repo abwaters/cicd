@@ -67,7 +67,4 @@ async function main(): Promise<void> {
     console.log(fragment);
 }
 
-main().catch(err => {
-    console.error(`\nCloudFront config generation failed: ${err.message || err}`);
-    process.exit(1);
-});
+export { main as run };

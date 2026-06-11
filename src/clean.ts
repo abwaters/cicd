@@ -571,7 +571,4 @@ async function main(): Promise<void> {
     console.timeEnd("clean");
 }
 
-main().catch(err => {
-    console.error(`\nClean failed: ${err.message || err}`);
-    process.exit(1);
-});
+export { main as run };

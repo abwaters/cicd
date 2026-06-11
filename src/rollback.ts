@@ -319,7 +319,4 @@ async function main(): Promise<void> {
     console.timeEnd("rollback");
 }
 
-main().catch(err => {
-    console.error(`\nRollback failed: ${err.message || err}`);
-    process.exit(1);
-});
+export { main as run };

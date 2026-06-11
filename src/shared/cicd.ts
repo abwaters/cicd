@@ -43,32 +43,63 @@ import { buildCloudFrontFragment } from './cfn-cloudfront';
 import * as awsContext from './aws-context';
 import * as logger from './logger';
 
-const rawExports = new Map<string, string>();
-const exportMap = new Map<string, ExportConfig>();
-const functionMap = new Map<string, FunctionConfig>();
-const workerMap = new Map<string, WorkerFunctionConfig>();
-let envCache: Map<string, string> | null = null;
-const psCache = new Map<string, string>();
-let stageConfig: StageConfig | null = null;
-let exportsInitialized = false;
+// All module caches live in a single state object so tests (and any future
+// embedding) can reset the orchestrator between runs instead of inheriting
+// whatever a previous deploy resolved.
+interface CicdState {
+    rawExports: Map<string, string>;
+    exportMap: Map<string, ExportConfig>;
+    functionMap: Map<string, FunctionConfig>;
+    workerMap: Map<string, WorkerFunctionConfig>;
+    envCache: Map<string, string> | null;
+    psCache: Map<string, string>;
+    stageConfig: StageConfig | null;
+    exportsInitialized: boolean;
+}
+
+function freshState(): CicdState {
+    return {
+        rawExports: new Map(),
+        exportMap: new Map(),
+        functionMap: new Map(),
+        workerMap: new Map(),
+        envCache: null,
+        psCache: new Map(),
+        stageConfig: null,
+        exportsInitialized: false,
+    };
+}
+
+let state: CicdState = freshState();
+
+function resetForTest(): void {
+    state = freshState();
+}
+
+function requireStageConfig(): StageConfig {
+    if (!state.stageConfig) {
+        throw new Error('stageConfig not set — call setStageConfig() first');
+    }
+    return state.stageConfig;
+}
 
 async function init(): Promise<void> {
-    if( !exportsInitialized ) {
+    if( !state.exportsInitialized ) {
         await initExports();
-        exportsInitialized = true;
+        state.exportsInitialized = true;
     }
 
-    if( !envCache ) {
+    if( !state.envCache ) {
         await initEnvironment();
     }
 }
 
 async function getVar(key: string): Promise<string> {
     await init();
-    if( !envCache!.has(key) ) {
+    if( !state.envCache!.has(key) ) {
         throw new Error(`Environment variable '${key}' not found in configuration`);
     }
-    return envCache!.get(key)!;
+    return state.envCache!.get(key)!;
 }
 
 async function expandVarNames(varNames: string): Promise<string[]> {
@@ -107,10 +138,10 @@ async function getVars(vars: string | string[] | undefined): Promise<Record<stri
 async function resolveVariable(key: string): Promise<string> {
     if (key.startsWith('!ImportValue ')) {
         const importName = key.substring(13).trim();
-        if (!rawExports.has(importName)) {
+        if (!state.rawExports.has(importName)) {
             throw new Error(`CloudFormation export '${importName}' not found (referenced by !ImportValue)`);
         }
-        return rawExports.get(importName)!;
+        return state.rawExports.get(importName)!;
     }
     if (key.startsWith('!SetEnv ')) {
         const envName = key.substring(8).trim();
@@ -122,15 +153,15 @@ async function resolveVariable(key: string): Promise<string> {
     }
     if (key.startsWith('!ParameterStore ')) {
         const psName = key.substring(16).trim();
-        if (psCache.has(psName)) {
-            return psCache.get(psName)!;
+        if (state.psCache.has(psName)) {
+            return state.psCache.get(psName)!;
         }
         const fetched = await ps.getParameterValue(psName, true);
         if (fetched === null) {
             throw new Error(`Parameter Store value '${psName}' not found in this account/region (referenced by !ParameterStore)`);
         }
         const cleaned = fetched.replace(/\\"/g, '"').replace(/\\\\n/g, "\\n");
-        psCache.set(psName, cleaned);
+        state.psCache.set(psName, cleaned);
         return cleaned;
     }
     return key;
@@ -143,7 +174,7 @@ async function initEnvironmentVars(env: Record<string, string> | undefined, erro
     for (const key of Object.keys(env)) {
         try {
             const val = await resolveVariable(env[key]);
-            envCache!.set(key, val);
+            state.envCache!.set(key, val);
         } catch (e: any) {
             errors.push(`  ${scope}.${key} = '${env[key]}'\n      ${e.message || e}`);
         }
@@ -151,11 +182,11 @@ async function initEnvironmentVars(env: Record<string, string> | undefined, erro
 }
 
 async function setStageConfig(stage: string): Promise<void> {
-    stageConfig = await getStageConfig(stage);
+    state.stageConfig = await getStageConfig(stage);
 }
 
 async function initEnvironment(): Promise<void> {
-    envCache = new Map();
+    state.envCache = new Map();
     const errors: string[] = [];
 
     // process primary variables
@@ -163,9 +194,9 @@ async function initEnvironment(): Promise<void> {
     await initEnvironmentVars(processVars, errors, 'environment');
 
     // process stage env vars
-    if (stageConfig) {
-        const stageVars = stageConfig.environment;
-        await initEnvironmentVars(stageVars, errors, `stages[${stageConfig.stage}].environment`);
+    if (state.stageConfig) {
+        const stageVars = state.stageConfig.environment;
+        await initEnvironmentVars(stageVars, errors, `stages[${state.stageConfig.stage}].environment`);
     }
 
     if (errors.length) {
@@ -179,52 +210,52 @@ async function initExports(): Promise<void> {
     try {
         const exportConfigs: ExportConfig[] = (await getConfig('exports')) || [];
         for(const cfg of exportConfigs) {
-            exportMap.set(cfg.name,cfg);
+            state.exportMap.set(cfg.name,cfg);
             if( cfg.functions ) {
                 for(const f of cfg.functions) {
-                    functionMap.set(f.name,f);
+                    state.functionMap.set(f.name,f);
                 }
             }
         }
 
         const workerConfigs: WorkerFunctionConfig[] = (await getConfig('workers')) || [];
         for(const w of workerConfigs) {
-            workerMap.set(w.name,w);
+            state.workerMap.set(w.name,w);
         }
 
         // get exports and load them
         const response = await cf.listExports();
         for(const e of (response || [])) {
-            if( exportMap.has(e.Name!) ) {
-                const cfg = exportMap.get(e.Name!)!;
+            if( state.exportMap.has(e.Name!) ) {
+                const cfg = state.exportMap.get(e.Name!)!;
                 cfg.value = e.Value;
-            }else if( functionMap.has(e.Name!) ) {
-                const cfg = functionMap.get(e.Name!)!;
+            }else if( state.functionMap.has(e.Name!) ) {
+                const cfg = state.functionMap.get(e.Name!)!;
                 cfg.value = e.Value;
-            }else if( workerMap.has(e.Name!) ) {
-                const cfg = workerMap.get(e.Name!)!;
+            }else if( state.workerMap.has(e.Name!) ) {
+                const cfg = state.workerMap.get(e.Name!)!;
                 cfg.value = e.Value;
             }
-            rawExports.set(e.Name!,e.Value!);
+            state.rawExports.set(e.Name!,e.Value!);
         }
 
         // did we miss any exports in the config?
         let cnt = 0;
-        for(const cfg of exportMap.values()) {
+        for(const cfg of state.exportMap.values()) {
             if( !cfg.hasOwnProperty('value') ) {
                 logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
         }
 
-        for(const cfg of functionMap.values()) {
+        for(const cfg of state.functionMap.values()) {
             if( !cfg.hasOwnProperty('value') ) {
                 logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
         }
 
-        for(const cfg of workerMap.values()) {
+        for(const cfg of state.workerMap.values()) {
             if( !cfg.hasOwnProperty('value') ) {
                 logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
@@ -237,13 +268,13 @@ async function initExports(): Promise<void> {
         // update values for any items that don't have values
         for(const cfg of exportConfigs) {
             if( !cfg.value ) {
-                const entry = exportMap.get(cfg.name)!;
+                const entry = state.exportMap.get(cfg.name)!;
                 cfg.value = entry.value;
             }
             if( cfg.functions ) {
                 for(const f of cfg.functions) {
                     if( !f.value ) {
-                        const entry = functionMap.get(f.name)!;
+                        const entry = state.functionMap.get(f.name)!;
                         f.value = entry.value;
                     }
                 }
@@ -252,19 +283,19 @@ async function initExports(): Promise<void> {
 
         for(const w of workerConfigs) {
             if( !w.value ) {
-                const entry = workerMap.get(w.name)!;
+                const entry = state.workerMap.get(w.name)!;
                 w.value = entry.value;
             }
         }
 
         // Resolve web exports' distribution CFN export to the CloudFront distribution ID.
         // Web exports carry two CFN export references: `name` (S3 bucket, resolved via the
-        // standard exportMap path) and `distribution` (CloudFront distribution ID, resolved here).
+        // standard state.exportMap path) and `distribution` (CloudFront distribution ID, resolved here).
         let webMissing = 0;
         for(const cfg of exportConfigs) {
             if (cfg.type !== 'web' || !cfg.distribution) continue;
-            if (rawExports.has(cfg.distribution)) {
-                cfg.distributionValue = rawExports.get(cfg.distribution);
+            if (state.rawExports.has(cfg.distribution)) {
+                cfg.distributionValue = state.rawExports.get(cfg.distribution);
             } else {
                 logger.error(`ERROR: could not find export for web distribution '${cfg.distribution}'.`);
                 webMissing++;
@@ -276,13 +307,13 @@ async function initExports(): Promise<void> {
 
         // Resolve each stage's CloudFront-mapping distribution CFN export to the
         // distribution ID (same pattern as web exports above). Stages live outside
-        // exportMap, so resolve them directly from rawExports onto the stage config.
+        // state.exportMap, so resolve them directly from state.rawExports onto the stage config.
         const stageConfigsForCf: StageConfig[] = (await getConfig('stages')) || [];
         let stageCfMissing = 0;
         for (const sc of stageConfigsForCf) {
             if (!sc.cloudfront) continue;
-            if (rawExports.has(sc.cloudfront.distribution)) {
-                sc.cloudfront.distributionValue = rawExports.get(sc.cloudfront.distribution);
+            if (state.rawExports.has(sc.cloudfront.distribution)) {
+                sc.cloudfront.distributionValue = state.rawExports.get(sc.cloudfront.distribution);
             } else {
                 logger.error(`ERROR: could not find export for stage '${sc.stage}' cloudfront distribution '${sc.cloudfront.distribution}'.`);
                 stageCfMissing++;
@@ -299,15 +330,15 @@ async function initExports(): Promise<void> {
 
 async function getExportByName(name: string): Promise<ExportConfig | null> {
     await init();
-    if( exportMap.has(name) ) {
-        return exportMap.get(name)!;
+    if( state.exportMap.has(name) ) {
+        return state.exportMap.get(name)!;
     }
     return null;
 }
 
 async function getExportsByType(type: string, filter?: string): Promise<ExportConfig[]> {
     await init();
-    // Read from the full config list rather than exportMap. exportMap is keyed by
+    // Read from the full config list rather than state.exportMap. state.exportMap is keyed by
     // CloudFormation export name, so multiple exports that legitimately share a
     // name — e.g. two web exports for the same S3 bucket but different CloudFront
     // distributions — collapse into one. init() has already resolved `value` and
@@ -319,7 +350,7 @@ async function getExportsByType(type: string, filter?: string): Promise<ExportCo
 
 async function getWorkers(stage?: string): Promise<WorkerFunctionConfig[]> {
     await init();
-    const workers = [...workerMap.values()];
+    const workers = [...state.workerMap.values()];
     if (stage) {
         return workers.filter(w => !w.stages || w.stages.includes(stage));
     }
@@ -585,7 +616,7 @@ async function processFunctionEnvironmentVars(dryRun: boolean = false): Promise<
     const apiFunctions =  await getLambdaExports('api');
     const snsFunctions =  await getLambdaExports('sns');
     const sqsFunctions =  await getLambdaExports('sqs');
-    const workerFunctions = await getWorkers(stageConfig?.stage);
+    const workerFunctions = await getWorkers(state.stageConfig?.stage);
     const functions = [...apiFunctions,...snsFunctions,...sqsFunctions,...workerFunctions];
     const results: EnvResult[] = [];
     logger.verbose(`\n * Creating environment vars for functions:`);
@@ -844,8 +875,8 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
 
         // checking sns for stage
         if( topic.hasOwnProperty('stages') ) {
-            if( !topic.stages!.includes(stageConfig!.stage) ) {
-                logger.verbose(`   - skipping '${topic.name}' in '${stageConfig!.stage}'`);
+            if( !topic.stages!.includes(requireStageConfig().stage) ) {
+                logger.verbose(`   - skipping '${topic.name}' in '${requireStageConfig().stage}'`);
                 results.push({ name: topic.name, action: 'skipped' });
                 continue;
             }
@@ -918,8 +949,8 @@ async function processSQSEventSources(stage: string, appAlias: string, commit: s
 
         // checking sqs for stage
         if( queue.hasOwnProperty('stages') ) {
-            if( !queue.stages!.includes(stageConfig!.stage) ) {
-                logger.verbose(`   - skipping '${queue.name}' in '${stageConfig!.stage}'`);
+            if( !queue.stages!.includes(requireStageConfig().stage) ) {
+                logger.verbose(`   - skipping '${queue.name}' in '${requireStageConfig().stage}'`);
                 results.push({ name: queue.name, action: 'skipped' });
                 continue;
             }
@@ -1256,8 +1287,8 @@ async function processFargateDeploy(stage: string, commit: string): Promise<Farg
 
     // 3. Build merged environment variables
     const resolvedEnvVars: Record<string, string> = {};
-    if (envCache) {
-        for (const [key, val] of envCache) {
+    if (state.envCache) {
+        for (const [key, val] of state.envCache) {
             resolvedEnvVars[key] = val;
         }
     }
@@ -1509,10 +1540,7 @@ async function validateRollbackTarget(appAlias: string, stage?: string, commit?:
 }
 
 async function getCurrentStageConfig(): Promise<StageConfig> {
-    if (!stageConfig) {
-        throw new Error('stageConfig not set — call setStageConfig() first');
-    }
-    return stageConfig;
+    return requireStageConfig();
 }
 
 // Resolve every variable reference (global + each stage) and return a list of
@@ -1522,9 +1550,9 @@ async function validateAllVariables(): Promise<string[]> {
     const errors: string[] = [];
 
     try {
-        if (!exportsInitialized) {
+        if (!state.exportsInitialized) {
             await initExports();
-            exportsInitialized = true;
+            state.exportsInitialized = true;
         }
     } catch (e: any) {
         errors.push(e.message || String(e));
@@ -1582,5 +1610,6 @@ export {
     resolveVariable,
     setStageConfig,
     getCurrentStageConfig,
+    resetForTest,
     validateAllVariables
 };

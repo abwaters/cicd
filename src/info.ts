@@ -496,7 +496,4 @@ async function main(): Promise<void> {
     console.timeEnd("info");
 }
 
-main().catch(err => {
-    console.error(`\nError: ${err.message || err}`);
-    process.exit(1);
-});
+export { main as run };
