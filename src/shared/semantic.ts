@@ -1,5 +1,5 @@
 import { CICDConfig, ThrottleSettings } from '../types';
-import { composeMappingPath } from './cicd';
+import { composeMappingPath, composeCloudFrontPath } from './cicd';
 
 // Semantic (cross-field) validation of cicd.json. Schema validation handles
 // shape; this enforces references, uniqueness, and computed-path collisions
@@ -101,6 +101,24 @@ export function semanticValidation(config: CICDConfig): string[] {
             if (seen.has(key)) {
                 errors.push(
                     `Stage '${stage.stage}': APIs '${seen.get(key)}' and '${api.name}' both resolve to '${stage.mapping.domain}/${composed}'`
+                );
+            } else {
+                seen.set(key, api.name);
+            }
+        }
+    }
+
+    // CloudFront path collision: two APIs that resolve to the same path pattern on
+    // the same distribution in the same stage would target conflicting behaviors.
+    for (const stage of config.stages || []) {
+        if (!stage.cloudfront) continue;
+        const seen = new Map<string, string>();
+        for (const api of apiExports) {
+            const composed = composeCloudFrontPath(stage.cloudfront, api);
+            const key = `${stage.cloudfront.distribution}|${composed}`;
+            if (seen.has(key)) {
+                errors.push(
+                    `Stage '${stage.stage}': APIs '${seen.get(key)}' and '${api.name}' both resolve to CloudFront path '/${composed}/*' on distribution '${stage.cloudfront.distribution}'`
                 );
             } else {
                 seen.set(key, api.name);
