@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     // Parse options
     const args = process.argv.slice(2);
     const o = options.getOptions(args);
+    options.enforceKnownOptions(o, 'validate', ['skipAws']);
 
     // Set verbose mode if requested
     if (o.verbose) {

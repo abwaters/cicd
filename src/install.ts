@@ -11,6 +11,7 @@ async function main(): Promise<void> {
     try {
         const args = process.argv.slice(2);
         const o = options.getOptions(args);
+        options.enforceKnownOptions(o, 'install', []);
 
         if (o.verbose) {
             logger.setVerbose(true);

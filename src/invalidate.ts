@@ -12,6 +12,7 @@ async function main(): Promise<void> {
 
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
+    options.enforceKnownOptions(o, 'invalidate', ['webFilter']);
     args = options.stripOptions(args);
 
     if (o.verbose) {

@@ -12,6 +12,7 @@ async function main(): Promise<void> {
 
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
+    options.enforceKnownOptions(o, 'restart', ['noWait']);
     args = options.stripOptions(args);
 
     // Set verbose mode if requested

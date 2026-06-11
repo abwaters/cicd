@@ -37,6 +37,7 @@ async function main(): Promise<void> {
     const region = await awsContext.getRegion();
     let args = process.argv.slice(2);
     const o = options.getOptions(args);
+    options.enforceKnownOptions(o, 'info', ['details']);
     args = options.stripOptions(args);
 
     // --details is a legacy alias for --verbose; keep it working silently.
