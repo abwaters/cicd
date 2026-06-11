@@ -48,39 +48,39 @@ async function publishNewVersion(functionName: string, commit: string): Promise<
 }
 
 async function listVersions(functionName: string): Promise<VersionListItem[]> {
-    try {
-        const command = new ListVersionsByFunctionCommand({
-            FunctionName: functionName
+    const lambdaClient = await getClient();
+    const versions: VersionListItem[] = [];
+    let marker: string | undefined = undefined;
+    do {
+        const command: ListVersionsByFunctionCommand = new ListVersionsByFunctionCommand({
+            FunctionName: functionName,
+            Marker: marker
         });
-        const lambdaClient = await getClient();
         const response = await awsRetry(() => lambdaClient.send(command));
-        const versions: VersionListItem[] = [];
         for(const version of (response.Versions || [])) {
             versions.push({version: version.Version!, description: version.Description!});
         }
-        return versions;
-    } catch (error) {
-        console.error("Error listing Lambda versions:", error);
-        return [];
-    }
+        marker = response.NextMarker;
+    } while (marker);
+    return versions;
 }
 
 async function listAliases(functionName: string): Promise<AliasInfo[]> {
-    try {
-        const command = new ListAliasesCommand({
-            FunctionName: functionName
+    const lambdaClient = await getClient();
+    const aliases: AliasInfo[] = [];
+    let marker: string | undefined = undefined;
+    do {
+        const command: ListAliasesCommand = new ListAliasesCommand({
+            FunctionName: functionName,
+            Marker: marker
         });
-        const lambdaClient = await getClient();
         const response = await awsRetry(() => lambdaClient.send(command));
-        const aliases: AliasInfo[] = [];
         for(const alias of (response.Aliases || [])) {
             aliases.push({alias: alias.Name!, version: alias.FunctionVersion!, description: alias.Description});
         }
-        return aliases;
-    } catch (error) {
-        console.error("Error listing Lambda aliases:", error);
-        return [];
-    }
+        marker = response.NextMarker;
+    } while (marker);
+    return aliases;
 }
 
 async function describeFunction(functionName: string): Promise<FunctionConfiguration | null | undefined> {
