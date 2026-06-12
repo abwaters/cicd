@@ -162,10 +162,24 @@ async function getStoppedTaskReasons(cluster: string, service: string): Promise<
     return [...new Set(reasons)]; // deduplicate
 }
 
+// Stability-wait tuning, overridable for slow-starting services:
+//   CICD_ECS_WAIT_TIMEOUT  — max seconds to wait for the service (default 600)
+//   CICD_ECS_POLL_INTERVAL — seconds between describe-service polls (default 15)
+function envSeconds(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (!raw) return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+        logger.warn(`   ! ignoring ${name}='${raw}' (expected a positive number of seconds)`);
+        return fallback;
+    }
+    return n;
+}
+
 async function waitForServicesStable(cluster: string, service: string): Promise<StabilityResult> {
     const ecsClient = await getClient();
-    const maxWaitTime = 600;
-    const pollInterval = 15;
+    const maxWaitTime = envSeconds('CICD_ECS_WAIT_TIMEOUT', 600);
+    const pollInterval = envSeconds('CICD_ECS_POLL_INTERVAL', 15);
     const startTime = Date.now();
 
     while ((Date.now() - startTime) / 1000 < maxWaitTime) {

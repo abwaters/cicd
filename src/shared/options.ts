@@ -35,7 +35,7 @@ function getOptions(args: string[]): CLIOptions {
             options[SHORT_FLAGS[arg]] = true;
         }
     }
-    if( options.hasOwnProperty('dryRun') && options.dryRun ) {
+    if( options.dryRun ) {
         console.log('DRY RUN: all actions will be simulated');
     }
     return options;

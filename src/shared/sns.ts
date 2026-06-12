@@ -34,7 +34,7 @@ async function listSubscriptionsByTopic(topicArn: string): Promise<SubscriptionI
         let command = new ListSubscriptionsByTopicCommand({
             TopicArn: topicArn
         });
-        let subscriptions: SubscriptionInfo[] = [];
+        const subscriptions: SubscriptionInfo[] = [];
         const snsClient = await getClient();
         let response = await awsRetry(() => snsClient.send(command));
         for(const r of (response.Subscriptions || [])) {

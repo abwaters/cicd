@@ -111,4 +111,4 @@ Examples:
 `);
 }
 
-main();
+void main();

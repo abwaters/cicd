@@ -15,7 +15,8 @@ function resolvePlugin(name: string): CICDPlugin {
     } catch (e: any) {
         throw new Error(
             `Failed to load plugin '${name}': ${e.message}\n` +
-            `  Install it with:  cicd install   (or: npm install ${name})`
+            `  Install it with:  cicd install   (or: npm install ${name})`,
+            { cause: e }
         );
     }
     const plugin: CICDPlugin = mod && mod.default ? mod.default : mod;

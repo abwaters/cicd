@@ -33,12 +33,13 @@ async function main(): Promise<void> {
     // Validate AWS credentials before proceeding
     await credentials.validateCredentials();
 
-    const account = await awsContext.getAccount();
-    const region = await awsContext.getRegion();
-    let args = process.argv.slice(2);
+    // Validates the account pin (getAccount throws on a mismatch) and warms
+    // the region cache; the values themselves aren't needed here.
+    await awsContext.getAccount();
+    await awsContext.getRegion();
+    const args = process.argv.slice(2);
     const o = options.getOptions(args);
     options.enforceKnownOptions(o, 'info', ['details']);
-    args = options.stripOptions(args);
 
     // --details is a legacy alias for --verbose; keep it working silently.
     if (o.details) o.verbose = true;
@@ -222,7 +223,7 @@ async function main(): Promise<void> {
                 commit: s.variables!.Commit,
                 functions: [] as any[]
             };
-            if( !stagesInfo[stagename].commits.hasOwnProperty(commit) ) {
+            if( !Object.prototype.hasOwnProperty.call(stagesInfo[stagename].commits, commit) ) {
                 stagesInfo[stagename].commits[commit] = 1;
             }else{
                 stagesInfo[stagename].commits[commit]++ ;
@@ -373,7 +374,7 @@ async function main(): Promise<void> {
     if (o.verbose && mainTip) console.log(`\nMain: ${mainTip}`);
     console.log(`\nStages:`);
     for(const [stageKey,stageEntry] of Object.entries(stagesInfo) ) {
-        let commits = commitsByStage.get(stageKey) || [];
+        const commits = commitsByStage.get(stageKey) || [];
         if (o.verbose) {
             if( commits.length === 1 ) {
                 console.log(`  ${stageKey.padEnd(15)} ${commits[0]}${driftLabel(stageKey, commits[0])}${branchAnnotation(commits[0])}`);

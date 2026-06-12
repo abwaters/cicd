@@ -25,7 +25,7 @@ import {
     VersionInfo,
     DeploymentInfo
 } from '../types';
-import { Deployment, Stage } from '@aws-sdk/client-api-gateway';
+import { Stage } from '@aws-sdk/client-api-gateway';
 import { ContainerDefinition } from '@aws-sdk/client-ecs';
 
 import * as lambda from './lambda';
@@ -242,21 +242,21 @@ async function initExports(): Promise<void> {
         // did we miss any exports in the config?
         let cnt = 0;
         for(const cfg of state.exportMap.values()) {
-            if( !cfg.hasOwnProperty('value') ) {
+            if( !Object.prototype.hasOwnProperty.call(cfg, 'value') ) {
                 logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
         }
 
         for(const cfg of state.functionMap.values()) {
-            if( !cfg.hasOwnProperty('value') ) {
+            if( !Object.prototype.hasOwnProperty.call(cfg, 'value') ) {
                 logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
         }
 
         for(const cfg of state.workerMap.values()) {
-            if( !cfg.hasOwnProperty('value') ) {
+            if( !Object.prototype.hasOwnProperty.call(cfg, 'value') ) {
                 logger.error(`ERROR: could not find export for '${cfg.name}'.`);
                 cnt++;
             }
@@ -324,7 +324,7 @@ async function initExports(): Promise<void> {
         }
 
     }catch(e) {
-        throw new Error(`Failed to initialize exports: ${e instanceof Error ? e.message : e}`);
+        throw new Error(`Failed to initialize exports: ${e instanceof Error ? e.message : e}`, { cause: e });
     }
 }
 
@@ -399,17 +399,6 @@ async function findAliasExact(functionName: string, aliasName: string): Promise<
         }
     }
     return null;
-}
-
-async function findTag(functionName: string, commit: string): Promise<boolean> {
-    const fc = await lambda.describeFunction(functionName);
-    const tags = await lambda.listFunctionTags(fc!.FunctionArn!);
-    if( tags.hasOwnProperty('Commit') ) {
-        if( tags.Commit.includes(commit) ) {
-            return true;
-        }
-    }
-    return false;
 }
 
 async function findDeployment(apiId: string, commit: string): Promise<DeploymentInfo | null> {
@@ -511,7 +500,7 @@ async function processLambdaVersionAndAlias(
     }
 
     let version = await findVersion(functionName, appAlias);
-    let alias = await findAlias(functionName, appAlias);
+    const alias = await findAlias(functionName, appAlias);
     if (alias) {
         logger.verbose(`   - alias for commit '${commit}' exists for function '${functionName}'`);
         if (concurrency) {
@@ -522,11 +511,11 @@ async function processLambdaVersionAndAlias(
     }
 
     if (!version) {
-        let v = await lambda.publishNewVersion(functionName, appAlias) as VersionInfo;
+        const v = await lambda.publishNewVersion(functionName, appAlias) as VersionInfo;
         version = v.version;
         logger.verbose(`   - using version ${version} for '${commit}'`);
-        let arn = v.arn.substring(0, v.arn.lastIndexOf(':'));
-        let tags = await lambda.listFunctionTags(arn);
+        const arn = v.arn.substring(0, v.arn.lastIndexOf(':'));
+        const tags = await lambda.listFunctionTags(arn);
         if (tags.Commit !== commit) {
             logger.verbose(`   - creating alias '${appAlias}' for earlier version of function at commit '${tags.Commit}'`);
         }
@@ -776,8 +765,8 @@ async function processApiGatewayApis(stage: string, appAlias: string, commit: st
         for(const f of api.functions!) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value!;
-            let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
-            let sourceArn = `arn:aws:execute-api:${region}:${account}:${apiId}/*/${f.method}/*`;
+            const functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
+            const sourceArn = `arn:aws:execute-api:${region}:${account}:${apiId}/*/${f.method}/*`;
             await lambda.addFunctionPermission(functionArn, sourceArn,'apigateway.amazonaws.com');
         }
 
@@ -874,7 +863,7 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
     for(const topic of topics) {
 
         // checking sns for stage
-        if( topic.hasOwnProperty('stages') ) {
+        if( Object.prototype.hasOwnProperty.call(topic, 'stages') ) {
             if( !topic.stages!.includes(requireStageConfig().stage) ) {
                 logger.verbose(`   - skipping '${topic.name}' in '${requireStageConfig().stage}'`);
                 results.push({ name: topic.name, action: 'skipped' });
@@ -894,7 +883,7 @@ async function processSNSSubscriptions(stage: string, appAlias: string, commit: 
         for(const f of topic.functions!) {
             logger.verbose(`   - updating permissions for '${f.name}'`);
             const functionName = f.value!;
-            let functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
+            const functionArn = `arn:aws:lambda:${region}:${account}:function:${functionName}:${appAlias}`;
             await lambda.addFunctionPermission(functionArn, topic.value!,'sns.amazonaws.com');
 
             // cleaning up existing subscriptions
@@ -948,7 +937,7 @@ async function processSQSEventSources(stage: string, appAlias: string, commit: s
     for(const queue of queues) {
 
         // checking sqs for stage
-        if( queue.hasOwnProperty('stages') ) {
+        if( Object.prototype.hasOwnProperty.call(queue, 'stages') ) {
             if( !queue.stages!.includes(requireStageConfig().stage) ) {
                 logger.verbose(`   - skipping '${queue.name}' in '${requireStageConfig().stage}'`);
                 results.push({ name: queue.name, action: 'skipped' });

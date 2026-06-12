@@ -264,6 +264,47 @@ cicd install --verbose
 
 If you're using a private registry (e.g. GitHub Packages), make sure your `.npmrc` is set up before running this — `cicd install` just shells out to `npm install` and will fail with the same auth error you'd see otherwise.
 
+### Env
+
+Output a stage's fully resolved environment variables (globals merged with the stage's overrides, `!ImportValue` / `!ParameterStore` / `!SetEnv` references resolved) in a shell-ready format:
+
+```bash
+cicd env dev                # Windows CMD format: set KEY=VALUE
+cicd env dev --linux        # export KEY="VALUE"
+cicd env dev --powershell   # $env:KEY = "VALUE"
+```
+
+### Restart
+
+Force a new deployment of a Fargate service without changing its task definition (`computeMode: "fargate"` only):
+
+```bash
+cicd restart dev
+
+# Don't wait for the service to stabilize
+cicd restart dev --no-wait
+```
+
+### Invalidate
+
+Create CloudFront invalidations for a stage's web exports without redeploying:
+
+```bash
+cicd invalidate dev                       # invalidates /*
+cicd invalidate dev /index.html /app.js   # specific paths
+cicd invalidate dev --web-filter=www      # limit to one web export
+```
+
+### CloudFront
+
+Generate the CloudFormation Origin + CacheBehavior fragment for a CloudFront-mapped stage (`stages[].cloudfront`) — paste it into your template once:
+
+```bash
+cicd cloudfront dev                      # YAML fragment
+cicd cloudfront dev --json               # JSON instead
+cicd cloudfront dev --api-filter=MyApi   # limit to one API
+```
+
 ### Validate
 
 Validate cicd.json configuration:

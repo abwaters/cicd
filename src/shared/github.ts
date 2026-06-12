@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { GitHubDeployment, BranchStatus } from '../types';
 
 import * as logger from './logger';
@@ -8,7 +8,7 @@ let ghAvailable: boolean | null = null;
 function isGhAvailable(): boolean {
     if (ghAvailable !== null) return ghAvailable;
     try {
-        execSync('gh --version', { stdio: 'ignore' });
+        execFileSync('gh', ['--version'], { stdio: 'ignore' });
         ghAvailable = true;
     } catch {
         ghAvailable = false;
@@ -17,7 +17,9 @@ function isGhAvailable(): boolean {
 }
 
 function ghApi(method: string, path: string, body?: Record<string, string | boolean | number>): any {
-    const args = ['gh', 'api', '-X', method, path, '-H', 'Accept: application/vnd.github+json'];
+    // execFileSync with an argument array: nothing is interpreted by a shell,
+    // so values containing spaces/quotes/metacharacters need no escaping.
+    const args = ['api', '-X', method, path, '-H', 'Accept: application/vnd.github+json'];
     if (body) {
         for (const [key, value] of Object.entries(body)) {
             if (typeof value === 'boolean' || typeof value === 'number') {
@@ -28,9 +30,8 @@ function ghApi(method: string, path: string, body?: Record<string, string | bool
         }
     }
 
-    const cmd = args.map(a => /[ &|<>^]/.test(a) ? `"${a}"` : a).join(' ');
     logger.verbose(`   - gh api: ${method} ${path}`);
-    const result = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    const result = execFileSync('gh', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     return JSON.parse(result);
 }
 
@@ -65,9 +66,9 @@ function createDeployment(
             production_environment: !!opts.productionEnvironment,
             transient_environment: !!opts.transientEnvironment
         });
-        const cmd = `gh api -X POST /repos/${repo}/deployments -H "Accept: application/vnd.github+json" --input -`;
+        const args = ['api', '-X', 'POST', `/repos/${repo}/deployments`, '-H', 'Accept: application/vnd.github+json', '--input', '-'];
         logger.verbose(`   - gh api: POST /repos/${repo}/deployments`);
-        const result = execSync(cmd, { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+        const result = execFileSync('gh', args, { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
         const deployment = JSON.parse(result);
         logger.verbose(`   - created GitHub deployment #${deployment.id} for ${environment}`);
         return deployment;

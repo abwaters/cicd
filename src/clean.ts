@@ -1,4 +1,4 @@
-import { ExportConfig, FunctionConfig, WorkerFunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanQueueResult, CleanFunctionResult, CleanWorkerResult, CleanEcrResult } from './types';
+import { ExportConfig, FunctionConfig, WorkerFunctionConfig, StageConfig, CleanApiResult, CleanTopicResult, CleanQueueResult, CleanFunctionResult, CleanWorkerResult } from './types';
 
 import * as sns from './shared/sns';
 import * as lambda from './shared/lambda';
@@ -28,8 +28,10 @@ async function main(): Promise<void> {
         logger.log('Verbose mode enabled');
     }
 
-    const account = await awsContext.getAccount();
-    const region = await awsContext.getRegion();
+    // Validates the account pin (getAccount throws on a mismatch) and warms
+    // the region cache; the values themselves aren't needed here.
+    await awsContext.getAccount();
+    await awsContext.getRegion();
     const app: string = await cicd.getConfig("app");
     const dryRun = !!o.dryRun;
 
@@ -66,7 +68,6 @@ async function main(): Promise<void> {
         const allStages: StageConfig[] = await cicd.getConfig("stages");
         for (const w of webExports) {
             const bucket = w.value!;
-            const distribution = w.distributionValue!;
             const applicableStages = allStages.filter(s => !w.stages || w.stages.includes(s.stage));
 
             // Drift check: the live marker commit (what the last swap placed into
@@ -214,7 +215,6 @@ async function main(): Promise<void> {
 
         // ── Phase 2: ECR image cleanup ───────────────────────────────
         let totalEcrDeleted = 0;
-        let totalEcrFailures = 0;
         console.log(`\nECR Image Cleanup:`);
 
         if (activeTags.size === 0) {
@@ -242,7 +242,7 @@ async function main(): Promise<void> {
                     } else {
                         const result = await ecr.batchDeleteImages(repositoryName, toDelete);
                         totalEcrDeleted = result.deleted;
-                        totalEcrFailures = result.failures;
+                        const totalEcrFailures = result.failures;
                         console.log(`  ${repositoryName.padEnd(30)} ${totalEcrDeleted} deleted, ${activeCount} active (${activeTagList})`);
                         if (totalEcrFailures > 0) {
                             console.log(`  ${' '.padEnd(30)} ${totalEcrFailures} failures`);
@@ -290,7 +290,7 @@ async function main(): Promise<void> {
     const stageList: StageConfig[] = await cicd.getConfig('stages');
     const stageNames = new Set(stageList.map(s => s.stage));
     const WORKER_VERSION_RETENTION = 5;
-    let activeCommits = new Map<string, boolean>();
+    const activeCommits = new Map<string, boolean>();
     let deletedDeployments=0,
         deletedAliases=0,
         deletedVersions=0;
@@ -382,7 +382,6 @@ async function main(): Promise<void> {
         const subscriptions = await sns.listSubscriptionsByTopic(topic.value!);
         let topicCommit: string | null = null;
         for(const subscription of subscriptions) {
-            const f = await lambda.describeFunction(subscription.endpoint);
             const parts = subscription.endpoint.split(':');
             if (parts.length === 8) {
                 logger.verbose(`   - Lambda alias '${parts[7]}' active on ${topic.name}`);
