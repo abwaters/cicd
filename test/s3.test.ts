@@ -148,6 +148,32 @@ describe('syncPrefix', () => {
         setupListing([], []);
         await expect(syncPrefix('bucket', 'dev/abc/', 'dev/live/')).rejects.toThrow(/source prefix .* is empty/);
     });
+
+    it('retains preserved-prefix objects but still prunes other stale objects', async () => {
+        setupListing(
+            ['dev/abc/index.html', 'dev/abc/assets/new.js'],
+            ['dev/live/index.html', 'dev/live/assets/old.js', 'dev/live/stale.html'],
+        );
+
+        await syncPrefix('bucket', 'dev/abc/', 'dev/live/', ['assets/']);
+
+        const deletes = mockSend.mock.calls.map(c => c[0]).filter(c => c.type === 'delete');
+        expect(deletes).toHaveLength(1);
+        // assets/old.js is retained; only the non-asset stale file is pruned.
+        expect(deletes[0].input.Delete.Objects).toEqual([{ Key: 'dev/live/stale.html' }]);
+    });
+
+    it('still prunes everything stale when no prefixes are preserved (default)', async () => {
+        setupListing(
+            ['dev/abc/index.html'],
+            ['dev/live/index.html', 'dev/live/assets/old.js'],
+        );
+
+        await syncPrefix('bucket', 'dev/abc/', 'dev/live/');
+
+        const deletes = mockSend.mock.calls.map(c => c[0]).filter(c => c.type === 'delete');
+        expect(deletes[0].input.Delete.Objects).toEqual([{ Key: 'dev/live/assets/old.js' }]);
+    });
 });
 
 describe('getObjectText / getJson', () => {
