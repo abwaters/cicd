@@ -1017,6 +1017,13 @@ async function processSQS(stage: string, appAlias: string, commit: string, dryRu
 const NOINDEX_ROBOTS_BODY = 'User-agent: *\nDisallow: /\n';
 const NOCACHE = 'no-cache, no-store, must-revalidate';
 
+// Relative-path prefixes under `{stage}/live/` whose objects are NOT pruned when a
+// new build is swapped in. These hold content-hashed, immutable build assets (Vite
+// emits them under `assets/`). Retaining them means a viewer whose browser still
+// holds a briefly-cached older HTML can keep loading the hashed chunks that HTML
+// references for the lifetime of that cached HTML, instead of hitting a 404.
+const RETAINED_LIVE_PREFIXES = ['assets/'];
+
 // Key for the live-commit marker. Lives directly under the stage prefix — NOT
 // under `{stage}/live/` — so the static `/{stage}/live` origin can never serve
 // it. GitHub deployments are the source of truth; this marker is a backup that
@@ -1072,7 +1079,7 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
             if (noindex) {
                 logger.verbose(`   - WOULD inject Disallow:/ robots.txt for noindex stage '${stage}'`);
             }
-            logger.verbose(`   - WOULD sync s3://${bucket}/${commitPrefix}/ → s3://${bucket}/${livePrefix}/ (copy then prune)`);
+            logger.verbose(`   - WOULD sync s3://${bucket}/${commitPrefix}/ → s3://${bucket}/${livePrefix}/ (copy then prune; ${RETAINED_LIVE_PREFIXES.join(', ')} retained)`);
             logger.verbose(`   - WOULD write live marker s3://${bucket}/${markerKey} (commit ${commit})`);
             logger.verbose(`   - WOULD invalidate /* on distribution '${distribution}'`);
             exports.push({
@@ -1096,7 +1103,7 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
             logger.verbose(`   - injected Disallow:/ robots.txt for noindex stage '${stage}'`);
         }
 
-        const synced = await s3.syncPrefix(bucket, `${commitPrefix}/`, `${livePrefix}/`);
+        const synced = await s3.syncPrefix(bucket, `${commitPrefix}/`, `${livePrefix}/`, RETAINED_LIVE_PREFIXES);
         logger.verbose(`   - synced ${synced} object(s) to s3://${bucket}/${livePrefix}/`);
 
         await s3.putObject(bucket, markerKey, JSON.stringify({ commit, deployedAt: new Date().toISOString() }), 'application/json; charset=utf-8', NOCACHE);
@@ -1187,7 +1194,7 @@ async function processWebRollback(stage: string, commit: string, webFilter?: str
             continue;
         }
 
-        const synced = await s3.syncPrefix(bucket, `${commitPrefix}/`, `${livePrefix}/`);
+        const synced = await s3.syncPrefix(bucket, `${commitPrefix}/`, `${livePrefix}/`, RETAINED_LIVE_PREFIXES);
         logger.verbose(`   - synced ${synced} object(s) to s3://${bucket}/${livePrefix}/`);
 
         await s3.putObject(bucket, markerKey, JSON.stringify({ commit, deployedAt: new Date().toISOString(), restored: true }), 'application/json; charset=utf-8', NOCACHE);
