@@ -192,13 +192,23 @@ async function deleteObjects(bucket: string, keys: string[]): Promise<number> {
     return deleted;
 }
 
-// Make destPrefix an exact mirror of srcPrefix with no window where it is empty
-// or partial: every source object is copied (overwriting) first, then any dest
-// object whose relative path is absent from the source is pruned. Server-side
-// copy with MetadataDirective defaulting to COPY preserves the source object's
-// ContentType and CacheControl (set by uploadDirectory). Returns the source
-// object count. Throws if the source prefix is empty (nothing to mirror).
-async function syncPrefix(bucket: string, srcPrefix: string, destPrefix: string): Promise<number> {
+// Make destPrefix mirror srcPrefix with no window where it is empty or partial:
+// every source object is copied (overwriting) first, then any dest object whose
+// relative path is absent from the source is pruned. Server-side copy with
+// MetadataDirective defaulting to COPY preserves the source object's ContentType
+// and CacheControl (set by uploadDirectory). Returns the source object count.
+// Throws if the source prefix is empty (nothing to mirror).
+//
+// `preservePrefixes` lists relative-path prefixes (e.g. 'assets/') that are NOT
+// pruned even when absent from the source — content-hashed immutable files are
+// retained so a viewer holding briefly-cached older HTML can still load the
+// hashed chunks it references after a new build replaces dest.
+async function syncPrefix(
+    bucket: string,
+    srcPrefix: string,
+    destPrefix: string,
+    preservePrefixes: string[] = []
+): Promise<number> {
     const src = srcPrefix.endsWith('/') ? srcPrefix : `${srcPrefix}/`;
     const dest = destPrefix.endsWith('/') ? destPrefix : `${destPrefix}/`;
 
@@ -220,7 +230,12 @@ async function syncPrefix(bucket: string, srcPrefix: string, destPrefix: string)
     }
 
     const liveKeys = await listObjectsByPrefix(bucket, dest);
-    const stale = liveKeys.filter(k => !newRel.has(k.slice(dest.length)));
+    const stale = liveKeys.filter(k => {
+        const rel = k.slice(dest.length);
+        if (newRel.has(rel)) return false;
+        if (preservePrefixes.some(p => rel.startsWith(p))) return false;
+        return true;
+    });
     await deleteObjects(bucket, stale);
 
     return srcKeys.length;
