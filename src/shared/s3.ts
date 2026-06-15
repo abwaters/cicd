@@ -57,6 +57,17 @@ function defaultCacheControl(key: string): string {
     return ext === 'html' ? HTML_CACHE : ASSET_CACHE;
 }
 
+// Build a cache-control resolver, optionally overriding the html / non-html
+// defaults (e.g. from a web export's `cacheControl` config). An override that
+// uses `s-maxage` lets CloudFront edge-cache HTML while a short `max-age` keeps
+// the browser copy fresh.
+function makeCacheControl(overrides?: { html?: string; assets?: string }): (key: string) => string {
+    const html = overrides?.html ?? HTML_CACHE;
+    const assets = overrides?.assets ?? ASSET_CACHE;
+    return (key: string) =>
+        path.extname(key).slice(1).toLowerCase() === 'html' ? html : assets;
+}
+
 interface UploadDirectoryResult {
     fileCount: number;
     totalBytes: number;
@@ -270,5 +281,6 @@ export {
     getObjectText,
     getJson,
     defaultContentType,
-    defaultCacheControl
+    defaultCacheControl,
+    makeCacheControl
 };

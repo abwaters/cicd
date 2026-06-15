@@ -20,7 +20,7 @@ jest.mock('@aws-sdk/client-s3', () => {
     };
 });
 
-import { defaultContentType, defaultCacheControl, syncPrefix, getObjectText, getJson } from '../src/shared/s3';
+import { defaultContentType, defaultCacheControl, makeCacheControl, syncPrefix, getObjectText, getJson } from '../src/shared/s3';
 
 describe('defaultContentType', () => {
     it.each([
@@ -83,6 +83,27 @@ describe('defaultCacheControl', () => {
     it('treats unknown extensions as immutable assets', () => {
         // Default policy: anything not html gets the long-lived cache header.
         expect(defaultCacheControl('archive.tar')).toBe('public, max-age=31536000, immutable');
+    });
+});
+
+describe('makeCacheControl', () => {
+    it('falls back to the defaults when no overrides are given', () => {
+        const cc = makeCacheControl();
+        expect(cc('index.html')).toBe('no-cache, no-store, must-revalidate');
+        expect(cc('assets/app.abc123.js')).toBe('public, max-age=31536000, immutable');
+    });
+
+    it('applies an html override (e.g. edge-cacheable via s-maxage) and keeps the asset default', () => {
+        const cc = makeCacheControl({ html: 'public, max-age=3600, s-maxage=86400' });
+        expect(cc('index.html')).toBe('public, max-age=3600, s-maxage=86400');
+        expect(cc('nested/page.html')).toBe('public, max-age=3600, s-maxage=86400');
+        expect(cc('assets/app.abc123.js')).toBe('public, max-age=31536000, immutable');
+    });
+
+    it('applies an assets override independently of html', () => {
+        const cc = makeCacheControl({ assets: 'public, max-age=600' });
+        expect(cc('index.html')).toBe('no-cache, no-store, must-revalidate');
+        expect(cc('logo.png')).toBe('public, max-age=600');
     });
 });
 
