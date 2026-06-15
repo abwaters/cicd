@@ -278,6 +278,23 @@
                   "type": "string"
                 },
                 "minItems": 1
+              },
+              "cacheControl": {
+                "type": "object",
+                "description": "Override the Cache-Control header written to S3 (and thus the CloudFront edge + browser). Defaults: html='no-cache, no-store, must-revalidate', assets='public, max-age=31536000, immutable'.",
+                "properties": {
+                  "html": {
+                    "type": "string",
+                    "description": "Cache-Control for .html objects (use s-maxage to let CloudFront edge-cache HTML while keeping a short browser max-age)",
+                    "minLength": 1
+                  },
+                  "assets": {
+                    "type": "string",
+                    "description": "Cache-Control for all non-.html objects (content-hashed assets)",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false

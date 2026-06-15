@@ -28,6 +28,11 @@ export interface ThrottleSettings {
     burstLimit: number;
 }
 
+export interface WebCacheControl {
+    html?: string;   // Cache-Control for .html (default: no-cache, no-store, must-revalidate)
+    assets?: string; // Cache-Control for non-.html (default: public, max-age=31536000, immutable)
+}
+
 export interface ExportConfig {
     type: 'api' | 'sns' | 'sqs' | 'web';
     name: string;
@@ -39,6 +44,7 @@ export interface ExportConfig {
     distribution?: string;          // web: CFN export name for CloudFront distribution ID
     source?: string;                // web: local source dir override (default ./dist)
     noindexStages?: string[];       // web: stages that get an injected Disallow:/ robots.txt
+    cacheControl?: WebCacheControl; // web: override Cache-Control for html / non-html objects
     value?: string;                 // resolved at runtime (S3 bucket name for web)
     distributionValue?: string;     // web: resolved at runtime (CloudFront distribution ID)
 }

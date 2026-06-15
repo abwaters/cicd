@@ -1088,7 +1088,8 @@ async function processWeb(stage: string, appAlias: string, commit: string, webFi
             continue;
         }
 
-        const { fileCount, totalBytes } = await s3.uploadDirectory(bucket, commitPrefix, source);
+        const cacheControlFor = s3.makeCacheControl(cfg.cacheControl);
+        const { fileCount, totalBytes } = await s3.uploadDirectory(bucket, commitPrefix, source, undefined, cacheControlFor);
         logger.verbose(`   - uploaded ${fileCount} files (${totalBytes} bytes)`);
 
         if (noindex) {
