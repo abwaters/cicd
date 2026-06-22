@@ -89,6 +89,20 @@ export function semanticValidation(config: CICDConfig): string[] {
         }
     }
 
+    if (config.computeMode === 'batch') {
+        if (!config.batch) {
+            errors.push(`computeMode 'batch' requires a 'batch' configuration block`);
+        } else {
+            const jobNames = new Set<string>();
+            for (const job of config.batch.jobs || []) {
+                if (jobNames.has(job.name)) {
+                    errors.push(`Duplicate batch job name '${job.name}'`);
+                }
+                jobNames.add(job.name);
+            }
+        }
+    }
+
     // API mapping path collision: two APIs that resolve to the same final path
     // on the same custom domain in the same stage cannot both be deployed.
     const apiExports = (config.exports || []).filter(e => e.type === 'api');

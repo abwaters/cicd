@@ -24,6 +24,7 @@ import * as credentials from './shared/credentials';
 import * as logger from './shared/logger';
 import * as github from './shared/github';
 import * as ecs from './shared/ecs';
+import * as batch from './shared/batch';
 import * as s3 from './shared/s3';
 import { printHeader } from './shared/header';
 import { loadPlugins } from './shared/plugins';
@@ -158,6 +159,70 @@ async function main(): Promise<void> {
                 }
             } catch (e: any) {
                 console.log(`  ${stage.stage.padEnd(15)} error: ${e.message}`);
+            }
+        }
+
+        // GitHub Deployments (verbose only)
+        if (o.verbose && repo) {
+            const ghResults: InfoGitHubResult[] = [];
+            for (const stage of stages) {
+                const deployments: GitHubDeployment[] = github.listDeployments(repo, stage.stage, 5);
+                if (deployments.length > 0) {
+                    ghResults.push({ stage: stage.stage, deployments });
+                }
+            }
+            if (ghResults.length > 0) {
+                console.log(`\nGitHub Deployments:`);
+                for (const r of ghResults) {
+                    console.log(`  ${r.stage}:`);
+                    for (const d of r.deployments) {
+                        const ts = new Date(d.createdAt).toLocaleString();
+                        console.log(`    ${d.ref.padEnd(10)} ${d.status.padEnd(12)} ${ts}`);
+                    }
+                }
+            }
+        }
+
+        if (!o.verbose) printLegend();
+        console.log();
+        console.timeEnd("info");
+        return;
+    }
+
+    if (computeMode === 'batch') {
+        // ── Batch info flow ──────────────────────────────────────────
+        // "What's live" = the latest ACTIVE job-definition revision per stage×job
+        // (that's the one EventBridge / submit-job resolve by name).
+        const app: string = await cicd.getConfig('app');
+        const batchConfig = await cicd.resolveBatchConfig();
+
+        if (o.verbose) console.log(`Collecting Batch job information...`);
+        if (o.verbose && mainTip) console.log(`\nMain: ${mainTip}`);
+        console.log(`\nStages:`);
+
+        for (const stage of stages) {
+            console.log(`  ${stage.stage}:`);
+            for (const job of batchConfig.jobs) {
+                const name = cicd.batchJobDefinitionName(app, stage.stage, job.name);
+                try {
+                    const def = await batch.describeLatestJobDefinition(name);
+                    if (!def) {
+                        console.log(`    ${job.name.padEnd(22)} not deployed`);
+                        continue;
+                    }
+                    const image = def.containerProperties?.image || '';
+                    const imageTag = image.split(':')[1] || 'unknown';
+                    const commit = def.tags?.Commit || imageTag;
+                    if (o.verbose) {
+                        console.log(`    ${job.name.padEnd(22)} ${commit.padEnd(12)} rev ${def.revision}${branchAnnotation(commit)}`);
+                        console.log(`      - job def:  ${name}:${def.revision}`);
+                        console.log(`      - image:    ${image}`);
+                    } else {
+                        console.log(`    ${job.name.padEnd(22)} ${commit}${branchAnnotation(commit)}`);
+                    }
+                } catch (e: any) {
+                    console.log(`    ${job.name.padEnd(22)} error: ${e.message}`);
+                }
             }
         }
 

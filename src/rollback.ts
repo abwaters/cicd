@@ -1,4 +1,4 @@
-import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, WebResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, BatchDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope, scopeLabel, deployTargetLabel, scopeOptionNames } from './shared/scope';
 import { loadPlugins } from './shared/plugins';
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
     const computeMode = (await cicd.getConfig("computeMode")) || 'lambda';
 
     // Safety check: verify rollback target aliases exist (Lambda mode only)
-    if (computeMode !== 'fargate') {
+    if (computeMode !== 'fargate' && computeMode !== 'batch') {
         const { valid, warnings } = await cicd.validateRollbackTarget(appAlias, stage, commit);
         if (!valid) {
             console.log(`\nWARNING: Some Lambda aliases for '${appAlias}' are missing:`);
@@ -238,6 +238,37 @@ async function main(): Promise<void> {
 
             if (ghDeployment) {
                 github.updateDeploymentStatus(repo, ghDeployment.id, rollbackStatus, `Rolled back ${appAlias} on ${stage}: ${summary}`);
+            }
+        } catch (err: any) {
+            if (ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'failure', err.message || 'Rollback failed');
+            }
+            throw err;
+        }
+
+        console.log();
+        console.timeEnd("rollback");
+        return;
+    }
+
+    if (computeMode === 'batch') {
+        // ── Batch rollback flow ──────────────────────────────────────
+        // Re-registers a job-definition revision pointing at the target commit's
+        // image; schedule/submit resolve by name → latest revision.
+        try {
+            const jobFilter = typeof o.job === 'string' ? o.job : undefined;
+            const result: BatchDeployResult = await cicd.processBatchRollback(stage, commit, dryRun, jobFilter);
+
+            console.log(`\nBatch Rollback:`);
+            for (const j of result.jobs) {
+                const rev = dryRun ? '(dry-run)' : `rev ${j.revision}`;
+                console.log(`  ${j.jobDefinitionName.padEnd(36)} ${rev.padEnd(10)} ${j.image}`);
+            }
+            const summary = `${result.jobs.length} job definition${result.jobs.length === 1 ? '' : 's'} rolled back to commit ${commit}`;
+            console.log(`\nRollback complete: ${summary}`);
+
+            if (ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Rolled back ${appAlias} on ${stage}: ${summary}`);
             }
         } catch (err: any) {
             if (ghDeployment) {

@@ -19,6 +19,7 @@ const TOP_LEVEL_KEYS = {
     repo: true,
     computeMode: true,
     fargate: true,
+    batch: true,
     environment: true,
     environmentGroups: true,
     throttle: true,

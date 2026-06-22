@@ -5,6 +5,10 @@ import {
     FargateConfig,
     FargateDeployResult,
     FargateRestartResult,
+    BatchConfig,
+    BatchJobConfig,
+    BatchDeployResult,
+    BatchJobDeployResult,
     StageConfig,
     StageCloudFront,
     ThrottleSettings,
@@ -32,6 +36,8 @@ import * as lambda from './lambda';
 import * as apigw from './apigw';
 import * as sns from './sns';
 import * as ecs from './ecs';
+import * as batch from './batch';
+import * as ecr from './ecr';
 import * as cf from './cloudformation';
 import * as s3 from './s3';
 import * as cloudfront from './cloudfront';
@@ -1540,6 +1546,176 @@ async function getCurrentStageConfig(): Promise<StageConfig> {
     return requireStageConfig();
 }
 
+// ─── Batch Deploy ────────────────────────────────────────────────────────────
+// CloudFormation owns the stable infra (job queue, ECR repos, IAM roles, log
+// groups, EventBridge rules that target job definitions BY NAME). This tool owns
+// the deployment artifact: a new job-definition revision per commit. Because
+// EventBridge / submit-job resolve a name → latest ACTIVE revision, registering
+// a new revision is automatically what the next scheduled run uses — no infra
+// mutation. This is the Fargate model with a job-def revision standing in for an
+// ECS task-def revision.
+
+interface ResolvedBatchConfig {
+    jobQueue: string;
+    executionRole?: string;
+    jobs: BatchJobConfig[];   // image/jobRole/executionRole resolved to concrete values
+}
+
+async function resolveBatchConfig(): Promise<ResolvedBatchConfig> {
+    await init();
+    const batchConfig: BatchConfig | undefined = await getConfig('batch');
+    if (!batchConfig) {
+        throw new Error("'batch' configuration is required when computeMode is 'batch'");
+    }
+    const jobQueue = (await resolveVariable(batchConfig.jobQueue)) || batchConfig.jobQueue;
+    const defaultExecutionRole = batchConfig.executionRole
+        ? (await resolveVariable(batchConfig.executionRole)) || batchConfig.executionRole
+        : undefined;
+
+    const jobs: BatchJobConfig[] = [];
+    for (const job of batchConfig.jobs) {
+        const image = (await resolveVariable(job.image)) || job.image;
+        const jobRole = job.jobRole ? (await resolveVariable(job.jobRole)) || job.jobRole : undefined;
+        const executionRole = job.executionRole
+            ? (await resolveVariable(job.executionRole)) || job.executionRole
+            : defaultExecutionRole;
+        jobs.push({ ...job, image, jobRole, executionRole });
+    }
+    return { jobQueue, executionRole: defaultExecutionRole, jobs };
+}
+
+// Registered job-definition name for a job in a stage. EventBridge rules in
+// CloudFormation must reference this exact name so new revisions are picked up.
+function batchJobDefinitionName(app: string, stage: string, jobName: string): string {
+    return `${app}-${stage}-${jobName}`;
+}
+
+async function processBatchDeploy(stage: string, commit: string, dryRun: boolean = false, jobFilter?: string): Promise<BatchDeployResult> {
+    await init();
+
+    const app: string = await getConfig('app');
+    const repo: string | undefined = await getConfig('repo');
+    const batchConfig = await resolveBatchConfig();
+
+    // Optional --job=a,b scope: deploy only the named jobs (e.g. when only the
+    // reminders image was rebuilt for this commit). The preflight then verifies
+    // exactly the selected jobs — nothing is registered for a job whose image
+    // wasn't pushed at this commit.
+    let jobs = batchConfig.jobs;
+    if (jobFilter) {
+        const wanted = jobFilter.split(',').map(s => s.trim()).filter(Boolean);
+        const known = new Set(batchConfig.jobs.map(j => j.name));
+        const unknown = wanted.filter(w => !known.has(w));
+        if (unknown.length) {
+            throw new Error(`--job names not found in cicd.json batch.jobs: ${unknown.join(', ')} (known: ${[...known].join(', ')})`);
+        }
+        const wantedSet = new Set(wanted);
+        jobs = batchConfig.jobs.filter(j => wantedSet.has(j.name));
+    }
+
+    // ── Phase 1: ECR preflight ───────────────────────────────────────────────
+    // CI owns the image push; the CLI must never *guess* that an image is there.
+    // Inspect the actual ECR state of each job's repo and require an exact match
+    // for {repo}:{commit}. Verify EVERY job before registering ANY, so a single
+    // missing image can't leave a partial set of job definitions pointing at this
+    // commit. One DescribeImages sweep per unique repo (reminders jobs share one).
+    const tagCache = new Map<string, Set<string>>();
+    async function tagsFor(repositoryName: string): Promise<Set<string>> {
+        if (!tagCache.has(repositoryName)) {
+            const tags = await ecr.listImageTags(repositoryName);
+            logger.verbose(`   - ECR ${repositoryName}: ${tags.size} tag(s) present`);
+            tagCache.set(repositoryName, tags);
+        }
+        return tagCache.get(repositoryName)!;
+    }
+
+    const missing: { job: string; repositoryName: string }[] = [];
+    for (const job of jobs) {
+        const repositoryName = ecr.parseRepositoryName(job.image);
+        const tags = await tagsFor(repositoryName);
+        if (!tags.has(commit)) {
+            missing.push({ job: job.name, repositoryName });
+        }
+    }
+
+    if (missing.length > 0) {
+        const lines: string[] = [];
+        for (const m of missing) {
+            const recent = await ecr.recentImageTags(m.repositoryName);
+            const avail = recent.length ? recent.join(', ') : '(no tagged images)';
+            lines.push(`  - ${m.job}: ${m.repositoryName}:${commit} not found. Recent tags: ${avail}`);
+        }
+        throw new Error(
+            `ECR preflight failed — no image tagged '${commit}' for ${missing.length} job(s). ` +
+            `Push the commit-tagged image (CI build) before deploying:\n${lines.join('\n')}`
+        );
+    }
+
+    // ── Phase 2: register job-definition revisions ───────────────────────────
+    // Base env: global + stage variables (already resolved into envCache by init()).
+    const baseEnv: Record<string, string> = {};
+    if (state.envCache) {
+        for (const [k, v] of state.envCache) baseEnv[k] = v;
+    }
+
+    const results: BatchJobDeployResult[] = [];
+    for (const job of jobs) {
+        const image = `${job.image}:${commit}`;
+        const jobDefName = batchJobDefinitionName(app, stage, job.name);
+
+        // Job-specific env merged over base env (job values support special prefixes).
+        const env: Record<string, string> = { ...baseEnv };
+        if (job.environment) {
+            for (const [k, val] of Object.entries(job.environment)) {
+                env[k] = await resolveVariable(val);
+            }
+        }
+        env['COMMIT'] = commit;
+
+        logger.verbose(`\n * Batch job '${jobDefName}':`);
+        logger.verbose(`   - image: ${image}`);
+
+        if (dryRun) {
+            logger.verbose(`   - [dry run] would register ${jobDefName}`);
+            results.push({ job: job.name, jobDefinitionName: jobDefName, jobDefinitionArn: '(dry-run)', revision: 0, image });
+            continue;
+        }
+
+        const tags: Record<string, string> = { Commit: commit, App: app, Job: job.name };
+        if (repo) tags['Repo'] = repo;
+
+        const registered = await batch.registerJobDefinition({
+            name: jobDefName,
+            image,
+            vcpu: job.vcpu,
+            memory: job.memory,
+            command: job.command,
+            jobRoleArn: job.jobRole,
+            executionRoleArn: job.executionRole,
+            logGroup: job.logGroup,
+            environment: env,
+            tags
+        });
+        logger.verbose(`   - registered revision ${registered.revision}: ${registered.arn}`);
+        results.push({
+            job: job.name,
+            jobDefinitionName: jobDefName,
+            jobDefinitionArn: registered.arn,
+            revision: registered.revision,
+            image
+        });
+    }
+
+    return { jobs: results };
+}
+
+// Rollback re-registers a new revision pointing at the prior commit's image.
+// Submit / EventBridge resolve by name → latest revision, so this reverts the
+// live job without touching any infra. Identical mechanics to deploy.
+async function processBatchRollback(stage: string, commit: string, dryRun: boolean = false, jobFilter?: string): Promise<BatchDeployResult> {
+    return processBatchDeploy(stage, commit, dryRun, jobFilter);
+}
+
 // Resolve every variable reference (global + each stage) and return a list of
 // failures rather than throwing on the first one. Requires AWS credentials so
 // CloudFormation exports and Parameter Store lookups can succeed.
@@ -1604,6 +1780,10 @@ export {
     processFargateDeploy,
     processFargateRestart,
     resolveFargateConfig,
+    processBatchDeploy,
+    processBatchRollback,
+    resolveBatchConfig,
+    batchJobDefinitionName,
     resolveVariable,
     setStageConfig,
     getCurrentStageConfig,

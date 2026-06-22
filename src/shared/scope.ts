@@ -93,6 +93,7 @@ export function deployTargetLabel(
     opts: { computeMode: string; exportTypes: string[]; hasWorkers: boolean }
 ): string {
     if (opts.computeMode === 'fargate') return 'fargate';
+    if (opts.computeMode === 'batch') return 'batch';
     const present = new Set(opts.exportTypes);
     const kinds: string[] = [];
     if (scope.processApi && present.has('api')) kinds.push('api');
