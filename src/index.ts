@@ -9,6 +9,7 @@ const COMMANDS: Record<string, { module: string; failLabel: string }> = {
     validate:   { module: './validate',   failLabel: 'Error validating configuration' },
     rollback:   { module: './rollback',   failLabel: 'Rollback failed' },
     restart:    { module: './restart',    failLabel: 'Restart failed' },
+    run:        { module: './trigger',    failLabel: 'Job submission failed' },
     env:        { module: './env',        failLabel: 'Error' },
     invalidate: { module: './invalidate', failLabel: 'Invalidation failed' },
     cloudfront: { module: './cloudfront', failLabel: 'CloudFront config generation failed' },
@@ -63,6 +64,8 @@ Commands:
   deploy <stage> <commit>     Deploy a commit to a stage
                               Options: --env, --api, --sns, --sqs, --workers, --web,
                                        --api-filter=<name>, --web-filter=<name>, --verbose
+                              Batch mode: --job=<name>[,<name>] limits the deploy to
+                                       specific jobs (preflights only those images)
 
   clean                       Clean up unused API deployments, Lambda aliases/versions
                               Options: --verbose
@@ -76,6 +79,10 @@ Commands:
 
   restart <stage>             Force restart a Fargate service (fargate mode only)
                               Options: --no-wait, --verbose
+
+  run <stage> <job>           Submit a Batch job on demand (batch mode only).
+                              Uses the latest ACTIVE job-definition revision.
+                              Options: --debug, --verbose
 
   env <stage>                 Output resolved environment variables for a stage
                               Options: --linux, --powershell, --verbose

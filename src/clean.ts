@@ -5,6 +5,7 @@ import * as lambda from './shared/lambda';
 import * as apigw from './shared/apigw';
 import * as ecs from './shared/ecs';
 import * as ecr from './shared/ecr';
+import * as batch from './shared/batch';
 import * as s3 from './shared/s3';
 import * as cicd from './shared/cicd';
 import * as awsContext from './shared/aws-context';
@@ -258,6 +259,98 @@ async function main(): Promise<void> {
 
         const verb = dryRun ? 'would' : '';
         console.log(`\nSummary${dryRunLabel}: ${verb ? verb + ' deregister' : 'Deregistered'} ${totalDeregistered} task definition revisions, ${verb ? verb + ' delete' : 'deleted'} ${totalEcrDeleted} ECR images`);
+        console.log();
+        console.timeEnd("clean");
+        return;
+    }
+
+    if (computeMode === 'batch') {
+        // ── Batch clean flow ─────────────────────────────────────────
+        // Deregister job-definition revisions outside the keep window (the latest
+        // ACTIVE revision is always kept — it's what the schedule runs), then sweep
+        // ECR images. Image tag == commit, and a repo is shared across jobs/stages.
+        console.log(`Cleaning old Batch job definition revisions and ECR images...`);
+        const batchConfig = await cicd.resolveBatchConfig();
+        const stages: StageConfig[] = await cicd.getConfig("stages");
+
+        // Union of all kept commits across every stage — ECR is shared across stages.
+        const allKeepTags = new Set<string>();
+        for (const set of keep.values()) for (const c of set) allKeepTags.add(c);
+
+        // repo name -> tags to keep (seeded with the global keep union)
+        const activeTagsByRepo = new Map<string, Set<string>>();
+        const repoForJob = new Map<string, string>();
+        for (const job of batchConfig.jobs) {
+            const repoName = ecr.parseRepositoryName(job.image);
+            repoForJob.set(job.name, repoName);
+            if (!activeTagsByRepo.has(repoName)) activeTagsByRepo.set(repoName, new Set(allKeepTags));
+        }
+
+        // ── Phase 1: Job definition revision cleanup ─────────────────
+        console.log(`\nJob Definition Cleanup:`);
+        let totalDeregistered = 0;
+        for (const stage of stages) {
+            const keepStage = keep.get(stage.stage) ?? new Set<string>();
+            for (const job of batchConfig.jobs) {
+                const name = cicd.batchJobDefinitionName(app, stage.stage, job.name);
+                const repoName = repoForJob.get(job.name)!;
+                try {
+                    const revisions = await batch.describeJobDefinitions(name, 'ACTIVE'); // newest first
+                    if (revisions.length === 0) {
+                        logger.verbose(`   - ${name}: none registered`);
+                        continue;
+                    }
+                    const latest = revisions[0];
+                    let deregistered = 0;
+                    for (const def of revisions) {
+                        const image = def.containerProperties?.image || '';
+                        const tag = def.tags?.Commit || image.split(':')[1];
+                        const isLatest = def.revision === latest.revision;
+                        if (isLatest || (tag && keepStage.has(tag))) {
+                            if (tag) activeTagsByRepo.get(repoName)!.add(tag);
+                            logger.verbose(`   - keep ${name}:${def.revision} (${tag})`);
+                            continue;
+                        }
+                        logger.verbose(`   - ${dryRun ? 'WOULD deregister' : 'Deregistering'} ${name}:${def.revision}`);
+                        if (!dryRun && def.jobDefinitionArn) await batch.deregisterJobDefinition(def.jobDefinitionArn);
+                        deregistered++;
+                    }
+                    totalDeregistered += deregistered;
+                    console.log(`  ${name.padEnd(40)} active rev ${latest.revision}, ${dryRun ? 'would deregister' : 'deregistered'} ${deregistered}`);
+                } catch (e: any) {
+                    console.log(`  ${name.padEnd(40)} error: ${e.message}`);
+                }
+            }
+        }
+
+        // ── Phase 2: ECR image cleanup (per unique repo) ─────────────
+        let totalEcrDeleted = 0;
+        console.log(`\nECR Image Cleanup:`);
+        for (const [repoName, activeTags] of activeTagsByRepo) {
+            try {
+                const allImages = await ecr.listImages(repoName);
+                const toDelete = allImages.filter((img: any) => !img.imageTag || !activeTags.has(img.imageTag));
+                const activeCount = allImages.length - toDelete.length;
+                const activeTagList = [...activeTags].map(t => t.substring(0, 7)).join(', ');
+                if (toDelete.length === 0) {
+                    console.log(`  ${repoName.padEnd(30)} no unused images, ${activeCount} active`);
+                    continue;
+                }
+                if (dryRun) {
+                    totalEcrDeleted += toDelete.length;
+                    console.log(`  ${repoName.padEnd(30)} ${toDelete.length} would be deleted, ${activeCount} active (${activeTagList})`);
+                } else {
+                    const result = await ecr.batchDeleteImages(repoName, toDelete);
+                    totalEcrDeleted += result.deleted;
+                    console.log(`  ${repoName.padEnd(30)} ${result.deleted} deleted, ${activeCount} active (${activeTagList})`);
+                    if (result.failures > 0) console.log(`  ${' '.padEnd(30)} ${result.failures} failures`);
+                }
+            } catch (e: any) {
+                console.log(`  ${repoName.padEnd(30)} error: ${e.message}`);
+            }
+        }
+
+        console.log(`\nSummary${dryRunLabel}: ${dryRun ? 'would deregister' : 'Deregistered'} ${totalDeregistered} job definition revisions, ${dryRun ? 'would delete' : 'deleted'} ${totalEcrDeleted} ECR images`);
         console.log();
         console.timeEnd("clean");
         return;

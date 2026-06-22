@@ -165,6 +165,47 @@ describe('semanticValidation - fargate', () => {
     });
 });
 
+describe('semanticValidation - batch', () => {
+    it('flags duplicate batch job names', () => {
+        const errors = semanticValidation(baseConfig({
+            computeMode: 'batch',
+            batch: {
+                jobQueue: '!ImportValue q',
+                jobs: [
+                    { name: 'reminders-morning', image: 'repo' },
+                    { name: 'reminders-morning', image: 'repo' },
+                ],
+            },
+            stages: [{ stage: 'prod' } as any],
+        }));
+        expect(errors).toContain("Duplicate batch job name 'reminders-morning'");
+    });
+
+    it('flags batch mode with no batch block', () => {
+        const errors = semanticValidation(baseConfig({
+            computeMode: 'batch',
+            stages: [{ stage: 'prod' } as any],
+        }));
+        expect(errors).toContain("computeMode 'batch' requires a 'batch' configuration block");
+    });
+
+    it('passes a valid batch config', () => {
+        const errors = semanticValidation(baseConfig({
+            computeMode: 'batch',
+            batch: {
+                jobQueue: '!ImportValue q',
+                executionRole: 'arn:aws:iam::123456789012:role/exec',
+                jobs: [
+                    { name: 'reminders-morning', image: 'repo', environment: { REMINDER_OFFSET: '0' } },
+                    { name: 'reminders-evening', image: 'repo', environment: { REMINDER_OFFSET: '1' } },
+                ],
+            },
+            stages: [{ stage: 'prod', production: true } as any],
+        }));
+        expect(errors).toHaveLength(0);
+    });
+});
+
 describe('semanticValidation - api mapping path collisions', () => {
     it('flags two APIs that resolve to the same domain+path', () => {
         const errors = semanticValidation(baseConfig({

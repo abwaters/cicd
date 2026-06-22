@@ -3,16 +3,31 @@
   "title": "CI/CD Configuration Schema",
   "description": "Schema for validating cicd.json configuration files for AWS Lambda/API Gateway/SNS deployments",
   "type": "object",
-  "if": {
-    "properties": { "computeMode": { "const": "fargate" } },
-    "required": ["computeMode"]
-  },
-  "then": {
-    "required": ["app", "fargate", "stages"]
-  },
-  "else": {
-    "required": ["app", "exports", "stages"]
-  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "computeMode": { "const": "fargate" } },
+        "required": ["computeMode"]
+      },
+      "then": { "required": ["app", "fargate", "stages"] }
+    },
+    {
+      "if": {
+        "properties": { "computeMode": { "const": "batch" } },
+        "required": ["computeMode"]
+      },
+      "then": { "required": ["app", "batch", "stages"] }
+    },
+    {
+      "if": {
+        "not": {
+          "properties": { "computeMode": { "enum": ["fargate", "batch"] } },
+          "required": ["computeMode"]
+        }
+      },
+      "then": { "required": ["app", "exports", "stages"] }
+    }
+  ],
   "properties": {
     "app": {
       "type": "string",
@@ -36,9 +51,9 @@
     },
     "computeMode": {
       "type": "string",
-      "enum": ["lambda", "fargate"],
+      "enum": ["lambda", "fargate", "batch"],
       "default": "lambda",
-      "description": "Compute mode: lambda (default) or fargate"
+      "description": "Compute mode: lambda (default), fargate, or batch"
     },
     "fargate": {
       "type": "object",
@@ -64,6 +79,30 @@
           "type": "string",
           "description": "HTTP API (API Gateway V2) ID for custom domain mappings. Supports !ImportValue resolution.",
           "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "batch": {
+      "type": "object",
+      "description": "AWS Batch configuration (required when computeMode is batch). Infra (queue, ECR repos, IAM roles, log groups, EventBridge rules) is owned by CloudFormation; this tool registers job-definition revisions per commit.",
+      "required": ["jobQueue", "jobs"],
+      "properties": {
+        "jobQueue": {
+          "type": "string",
+          "description": "Batch job queue ARN or name. Supports !ImportValue resolution.",
+          "minLength": 1
+        },
+        "executionRole": {
+          "type": "string",
+          "description": "Default ECS task execution role ARN for all jobs (can be overridden per job). Supports !ImportValue resolution.",
+          "minLength": 1
+        },
+        "jobs": {
+          "type": "array",
+          "description": "Container jobs to deploy. Each registers a job-definition revision named {app}-{stage}-{job.name}.",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/batchJobConfig" }
         }
       },
       "additionalProperties": false
@@ -431,6 +470,56 @@
   },
   "additionalProperties": false,
   "definitions": {
+    "batchJobConfig": {
+      "type": "object",
+      "description": "AWS Batch container job. Registered as a job-definition revision per deploy; settings here form the deployment artifact (CloudFormation owns only the queue, ECR repo, roles, log group, and EventBridge rule).",
+      "required": ["name", "image"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Logical job name (e.g. 'reminders-morning'). The registered job definition is named {app}-{stage}-{name}.",
+          "minLength": 1
+        },
+        "image": {
+          "type": "string",
+          "description": "ECR repository URI (without tag). Tagged :{commit} at deploy time. Supports !ImportValue resolution.",
+          "minLength": 1
+        },
+        "jobRole": {
+          "type": "string",
+          "description": "IAM job role ARN granting the container its runtime permissions. Supports !ImportValue resolution."
+        },
+        "executionRole": {
+          "type": "string",
+          "description": "ECS task execution role ARN (overrides batch.executionRole for this job). Supports !ImportValue resolution."
+        },
+        "vcpu": {
+          "type": "number",
+          "description": "vCPU reserved for the job (default 1).",
+          "minimum": 0
+        },
+        "memory": {
+          "type": "number",
+          "description": "Memory in MiB reserved for the job (default 1024).",
+          "minimum": 1
+        },
+        "command": {
+          "type": "array",
+          "description": "Container command override (e.g. [\"node\", \"dist/jobs/reminders/index.js\"]).",
+          "items": { "type": "string" }
+        },
+        "logGroup": {
+          "type": "string",
+          "description": "CloudWatch log group name for the awslogs driver (e.g. /ccfw/reminders)."
+        },
+        "environment": {
+          "type": "object",
+          "description": "Job-specific environment variables, merged over global and stage environment. Supports !ImportValue, !ParameterStore, and !SetEnv prefixes.",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
     "apiFunctionConfig": {
       "type": "object",
       "description": "API Gateway Lambda function configuration (requires HTTP method)",

@@ -5,8 +5,9 @@ export interface CICDConfig {
     account?: string;
     region?: string;
     repo?: string;
-    computeMode?: 'lambda' | 'fargate';
+    computeMode?: 'lambda' | 'fargate' | 'batch';
     fargate?: FargateConfig;
+    batch?: BatchConfig;
     environment?: Record<string, string>;
     environmentGroups?: Record<string, string[]>;
     throttle?: ThrottleSettings;
@@ -21,6 +22,24 @@ export interface FargateConfig {
     ecrRepository: string;
     containerName: string;
     httpApi?: string;
+}
+
+export interface BatchConfig {
+    jobQueue: string;                       // job queue ARN or name; !ImportValue supported
+    executionRole?: string;                 // default execution role for all jobs; !ImportValue supported
+    jobs: BatchJobConfig[];
+}
+
+export interface BatchJobConfig {
+    name: string;                           // logical job name (e.g. "reminders-morning")
+    image: string;                          // ECR repository URI; !ImportValue supported. Tagged :{commit} at deploy.
+    jobRole?: string;                       // IAM job role ARN; !ImportValue supported
+    executionRole?: string;                 // overrides BatchConfig.executionRole for this job
+    vcpu?: number;                          // default 1
+    memory?: number;                        // MiB, default 1024
+    command?: string[];                     // container command override
+    logGroup?: string;                      // CloudWatch log group for awslogs driver
+    environment?: Record<string, string>;   // job-specific env; merged over global+stage. Special prefixes supported.
 }
 
 export interface ThrottleSettings {
@@ -129,6 +148,7 @@ export interface CLIOptions {
     web?: boolean;
     apiFilter?: string;
     webFilter?: string;
+    job?: string;
     dryRun?: boolean;
     details?: boolean;
     force?: boolean;
@@ -391,6 +411,20 @@ export interface FargateRestartResult {
     service: string;
     taskDefinitionArn: string;
     serviceStable: boolean;
+}
+
+// ─── Batch Deploy Result Types ───────────────────────────────────────────────
+
+export interface BatchJobDeployResult {
+    job: string;                            // logical job name
+    jobDefinitionName: string;              // registered job definition name ({app}-{stage}-{job})
+    jobDefinitionArn: string;               // ARN of the new revision
+    revision: number;
+    image: string;                          // {repoUri}:{commit}
+}
+
+export interface BatchDeployResult {
+    jobs: BatchJobDeployResult[];
 }
 
 // ─── Clean Command Types ─────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, WebResult } from './types';
+import { EnvResult, APIResult, SNSResult, SQSResult, WorkerResult, FargateDeployResult, BatchDeployResult, WebResult } from './types';
 import { printDeploymentSummary } from './shared/summary';
 import { resolveScope, deployTargetLabel, scopeOptionNames } from './shared/scope';
 import { loadPlugins } from './shared/plugins';
@@ -196,6 +196,38 @@ async function main(): Promise<void> {
 
             if (repo && ghDeployment) {
                 github.updateDeploymentStatus(repo, ghDeployment.id, deployStatus, `Deployed ${appAlias} to ${stage}: ${summary}`);
+            }
+        } catch (err: any) {
+            if (repo && ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'failure', err.message || 'Deployment failed');
+            }
+            throw err;
+        }
+
+        console.log();
+        console.timeEnd("deploy");
+        return;
+    }
+
+    if (computeMode === 'batch') {
+        // ── Batch deploy flow ────────────────────────────────────────
+        // Registers a new job-definition revision per job. EventBridge rules
+        // (owned by CloudFormation) target the job def by name, so the next
+        // scheduled run picks up the new revision automatically.
+        try {
+            const jobFilter = typeof o.job === 'string' ? o.job : undefined;
+            const result: BatchDeployResult = await cicd.processBatchDeploy(stage, commit, dryRun, jobFilter);
+
+            console.log(`\nBatch Deployment:`);
+            for (const j of result.jobs) {
+                const rev = dryRun ? '(dry-run)' : `rev ${j.revision}`;
+                console.log(`  ${j.jobDefinitionName.padEnd(36)} ${rev.padEnd(10)} ${j.image}`);
+            }
+            const summary = `${result.jobs.length} job definition${result.jobs.length === 1 ? '' : 's'} registered for commit ${commit}`;
+            console.log(`\nSummary: ${summary}`);
+
+            if (repo && ghDeployment) {
+                github.updateDeploymentStatus(repo, ghDeployment.id, 'success', `Deployed ${appAlias} to ${stage}: ${summary}`);
             }
         } catch (err: any) {
             if (repo && ghDeployment) {
